@@ -22,6 +22,7 @@ public final class CropView extends View {
     public CropView(Context c){super(c);setLayerType(View.LAYER_TYPE_SOFTWARE,null);}
     public void setBitmapSize(int w,int h){width=Math.max(1,w);height=Math.max(1,h);invalidate();}
     public void setCropEnabled(boolean enabled){cropping=enabled;invalidate();}
+    public boolean isCropActive(){return cropping;}
     public void setAspect(float ratio){
         aspect=ratio;
         frame=new RectF(.08f,.08f,.92f,.92f);
