@@ -2,6 +2,7 @@ package com.ampyeos.canon;
 
 import android.graphics.Bitmap;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import androidx.annotation.NonNull;
 import androidx.camera.core.ImageProxy;
 import com.google.android.gms.tasks.Task;
@@ -21,11 +22,15 @@ import java.util.List;
 public final class SubjectAi {
     public interface Callback { void onResult(String result); }
     private final ObjectDetector objects;
+    private final ObjectDetector stillObjects;
     private final FaceDetector faces;
 
     public SubjectAi() {
         objects=ObjectDetection.getClient(new ObjectDetectorOptions.Builder()
             .setDetectorMode(ObjectDetectorOptions.STREAM_MODE)
+            .enableMultipleObjects().enableClassification().build());
+        stillObjects=ObjectDetection.getClient(new ObjectDetectorOptions.Builder()
+            .setDetectorMode(ObjectDetectorOptions.SINGLE_IMAGE_MODE)
             .enableMultipleObjects().enableClassification().build());
         faces=FaceDetection.getClient(new FaceDetectorOptions.Builder()
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
@@ -83,5 +88,47 @@ public final class SubjectAi {
             return "AI · "+type+": centrato. Prova un'inquadratura decentrata oppure valorizza la simmetria.";
         return "AI · "+type+": prova a posizionarlo su uno dei punti della griglia dei terzi.";
     }
-    public void close(){objects.close();faces.close();}
+
+    /** Report from actual on-device ML Kit inference, not edge saliency. */
+    public static final class Observation {
+        public final RectF normalizedBox;
+        public final String description;
+        Observation(RectF b,String s){normalizedBox=b;description=s;}
+    }
+    public interface ObservationCallback {void onResult(Observation observation);}
+    public void observe(Bitmap bitmap,ObservationCallback callback){
+        try {
+            InputImage input=InputImage.fromBitmap(bitmap,0);
+            Task<List<DetectedObject>> objectsTask=stillObjects.process(input);
+            Task<List<Face>> facesTask=faces.process(input);
+            Tasks.whenAllComplete(objectsTask,facesTask).addOnCompleteListener(t->{
+                String name="Nessun volto o oggetto riconosciuto";
+                Rect found=null;
+                try{
+                    List<Face> facesFound=facesTask.isSuccessful()?facesTask.getResult():null;
+                    List<DetectedObject> objectsFound=objectsTask.isSuccessful()?objectsTask.getResult():null;
+                    if(facesFound!=null&&!facesFound.isEmpty()){
+                        found=facesFound.get(0).getBoundingBox();
+                        name=facesFound.size()==1?"Volto rilevato":facesFound.size()+" volti rilevati";
+                    }else if(objectsFound!=null&&!objectsFound.isEmpty()){
+                        DetectedObject o=objectsFound.get(0);
+                        found=o.getBoundingBox();
+                        name=o.getLabels().isEmpty()?"Oggetto rilevato":
+                            "Oggetto: "+o.getLabels().get(0).getText();
+                    }
+                }catch(Exception ignored){}
+                RectF normalized=null;
+                if(found!=null){
+                    normalized=new RectF(
+                        Math.max(0,found.left/(float)bitmap.getWidth()),
+                        Math.max(0,found.top/(float)bitmap.getHeight()),
+                        Math.min(1,found.right/(float)bitmap.getWidth()),
+                        Math.min(1,found.bottom/(float)bitmap.getHeight()));
+                }
+                callback.onResult(new Observation(normalized,name));
+            });
+        }catch(Exception e){callback.onResult(new Observation(null,
+            "Analisi semantica non disponibile: "+e.getMessage()));}
+    }
+    public void close(){objects.close();stillObjects.close();faces.close();}
 }
