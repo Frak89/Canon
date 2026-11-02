@@ -73,6 +73,7 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
     private Spinner profiles;
     private Button pixelShutter;
     private TextView lookAdvice,lesson,diagnostics;
+    private String currentSubjectSpoken="Non ho ancora riconosciuto un soggetto.";
     private int shots=0;
     private int frameCount=0;
     private PreviewView pixelView;
@@ -197,6 +198,8 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
         diagnostics=text("CANON: non collegata",11,0xffabc7d4);
         state=text("PIXEL · nessuna immagine inviata al cloud",11,0xff9badbd);
         panel.addView(diagnostics);panel.addView(state);
+        panel.addView(text("COLORI · MENTA CHIARO = ON · SCURO = OFF o NON DISPONIBILE · BLU = AZIONE",
+            10,0xffb8d5e3));
     }
 
     private void update(PhotoAnalyzer.Result result) {
@@ -210,10 +213,11 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
         PhotoCoach.Profile profile=PhotoCoach.Profile.values()[Math.max(0,Math.min(
             profiles.getSelectedItemPosition(),PhotoCoach.Profile.values().length-1))];
         String teacher=PhotoCoach.suggest(result,profile);
-        lesson.setText("MAESTRO · "+teacher);
+        String lecture=currentSubjectSpoken+" "+teacher;
+        lesson.setText("MAESTRO · "+lecture);
         if(autoCompose && ++frameCount%4==0)composer.setTarget(result.focusX,result.focusY);
         if(voice && now-lastVoice>11000 && speech!=null) {
-            lastVoice=now;speech.speak(teacher,TextToSpeech.QUEUE_FLUSH,null,"ampyeos-coach");
+            lastVoice=now;speech.speak(lecture,TextToSpeech.QUEUE_FLUSH,null,"ampyeos-coach");
         }
     }
     private void log(String message) {ui.post(()-> {if(!closing)state.setText(message);});}
@@ -224,6 +228,7 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
         recordButton.setEnabled(false);
         pixelShutter.setEnabled(true);
         currentMode="PIXEL";
+        currentSubjectSpoken="Non ho ancora riconosciuto un soggetto.";
         canonView.setVisibility(View.GONE);pixelView.setVisibility(View.VISIBLE);
         modeLabel.setText("AmpyEOS / PIXEL LIVE");
         log("PIXEL LIVE · elaborazione offline");
@@ -263,7 +268,9 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
                             handedOff=true;
                             subjectAi.analyze(frame,message->{
                                 aiBusy.set(false);
-                                ui.post(()->{if(!closing && "PIXEL".equals(currentMode))aiText.setText(message);});
+                                ui.post(()->{if(!closing && "PIXEL".equals(currentMode)){
+                                    aiText.setText(message);currentSubjectSpoken=message;
+                                }});
                             });
                         }
                     }catch(Exception e){log("Analisi frame: "+e.getMessage());}
@@ -288,7 +295,8 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
     private void connectCanon(String address) {
         if(address.trim().isEmpty()){log("Indirizzo Canon vuoto");return;}
         getPreferences(MODE_PRIVATE).edit().putString("canon_host",address.trim()).apply();
-        currentMode="CANON";canonLoop.set(false);shutter.setEnabled(false);
+        currentMode="CANON";currentSubjectSpoken="Attendo i fotogrammi Canon.";
+        canonLoop.set(false);shutter.setEnabled(false);
         recordButton.setEnabled(false);pixelShutter.setEnabled(false);
         if(cameraProvider!=null)cameraProvider.unbindAll();
         pixelView.setVisibility(View.GONE);canonView.setVisibility(View.VISIBLE);
@@ -317,7 +325,9 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
                         if(subjectAi!=null && (++frameCount%5==0) && aiBusy.compareAndSet(false,true)) {
                             subjectAi.analyze(frame,message->{
                                 aiBusy.set(false);
-                                ui.post(()->{if(!closing && "CANON".equals(currentMode))aiText.setText(message);});
+                                ui.post(()->{if(!closing && "CANON".equals(currentMode)){
+                                    aiText.setText(message);currentSubjectSpoken=message;
+                                }});
                             });
                         }
                         ui.post(()->{
