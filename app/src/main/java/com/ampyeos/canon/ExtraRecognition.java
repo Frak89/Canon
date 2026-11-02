@@ -199,6 +199,9 @@ public final class ExtraRecognition {
      * Files may reside in Downloads or another folder selected by the user.
      */
     public void importFromDevice(Uri selected,Callback callback){
+        importFromDevice(selected,null,callback);
+    }
+    public void importFromDevice(Uri selected,Bitmap imageToClassify,Callback callback){
         if(closed||selected==null)return;
         if(!busy.compareAndSet(false,true)){
             notifyStatus(callback,"Importazione non avviata: è già attiva un'operazione AI.");
@@ -254,6 +257,14 @@ public final class ExtraRecognition {
                         }finally{labelStage.delete();}
                     }else{
                         notifyStatus(callback,"Modello ed etichette verificati. Riconoscimento AI pronto offline.");
+                    }
+                }
+                if(model.isFile() && labels.isFile() && verifyExisting()) {
+                    ready=true;
+                    if(imageToClassify!=null&&!closed){
+                        notifyStatus(callback,"Modello importato: analizzo subito la fotografia.");
+                        Recognition result=classifyLocal(imageToClassify);
+                        main.post(()->{if(!closed)callback.result(result);});
                     }
                 }
             }catch(Exception e){
