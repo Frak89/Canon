@@ -1,6 +1,24 @@
-# AmpyEOS 0.5.1 — AI Auto-Download Wi-Fi + 4G/5G
+# AmpyEOS 0.5.2 — AI Model Download Repair and Offline Import
 
 App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
+
+## Novità v0.5.2 · Riparazione download + file dalla cartella Download
+
+- Corretto l'errore visibile `Pacchetto supera il limite previsto`: il vecchio limite di download era **24 MiB**, troppo basso per l'archivio ufficiale. Ora vale **512 MiB** per l'archivio e **256 MiB** per il modello estratto (limiti anti-abuso per proteggere memoria e spazio disco).
+- **IMPORTA MODELLO DA DOWNLOAD** in Color Lab/Virtual Classroom e **MODELLO DA DOWNLOAD** nel Live: selettore file Android `ACTION_OPEN_DOCUMENT`; consente scegliere un file `.tgz`, `.tar.gz`, `.tflite` oppure `ImageNetLabels.txt` da Download o da altri provider documenti.
+- Non richiede accesso a tutta la memoria: Android concede l'accesso soltanto al file selezionato. Applica gli stessi SHA-256 del modello TensorFlow Lite e delle 1001 etichette ufficiali.
+- Importazione può avvenire anche offline **se selezioni sia il modello sia le etichette**; se mancano le etichette tenta di scaricare soltanto il piccolo file `ImageNetLabels.txt`.
+- Se hai già aperto una foto nell'editor, dopo l'installazione valida del modello la classifica automaticamente e mostra il risultato; dal Live usa l'ultimo frame Pixel disponibile.
+- Corretto l'allineamento con la status bar su Android 15/16/17 (system insets) ed eliminati overlay sulla schermata vuota prima di aprire una foto. La preview originale viene impostata subito dopo la decodifica; immagini con valori quasi tutti neri generano un avviso.
+- **Qwen**: il formato `.gguf` non viene installato dal classificatore TFLite; in questa release la priorità è ripristinare MobileNet affidabile. Un modello Qwen-VL multimodale richiede un runtime Vision Language separato, più oneroso in RAM.
+
+### Installazione manuale
+1. Scarica `mobilenet_v2_1.0_224.tgz` da https://storage.googleapis.com/download.tensorflow.org/models/tflite_11_05_08/mobilenet_v2_1.0_224.tgz
+2. In Color Lab premi `IMPORTA MODELLO DA DOWNLOAD` e seleziona il file scaricato: sarà estratto e controllato localmente.
+3. Se le etichette non sono state scaricate automaticamente, scarica `ImageNetLabels.txt` da https://storage.googleapis.com/download.tensorflow.org/data/ImageNetLabels.txt e importa anche quel file.
+4. Apri una foto o premi `RICONOSCIMENTO EXTRA`. Dopo l'importazione l'analisi funziona offline.
+
+**Nessun supporto per modelli TFLite arbitrari:** l'algoritmo dipende dal formato e dalla normalizzazione del MobileNet ufficiale, e rifiuta file diversi per evitare errori di incompatibilità.
 
 ## Novità v0.5.1 · Download AI automatico anche su rete mobile
 
