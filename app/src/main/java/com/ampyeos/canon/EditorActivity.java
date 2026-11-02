@@ -694,6 +694,10 @@ public final class EditorActivity extends Activity {
                 Bitmap straight=AutoOptimizer.straighten(candidate,
                     visual.lineAngleDegrees,visual.lineConfidence);
                 Bitmap result=AutoOptimizer.tone(straight,PhotoAnalyzer.fromBitmap(straight));
+                PhotoReview finalReview=PhotoReview.inspect(result);
+                PhotoReview initialReview=PhotoReview.inspect(source);
+                int delta=finalReview.metrics.score-initialReview.metrics.score;
+                String finalVerdict=PhotoReview.compare(initialReview,finalReview);
                 ui.post(()->{
                     if(closing||original!=source)return;
                     masterSession=session;activePlan=session.best.plan;
@@ -702,13 +706,16 @@ public final class EditorActivity extends Activity {
                     selectedLook=ColorLooks.Look.NATURALE;looks.setSelection(0);
                     brightness.setProgress(100);contrast.setProgress(100);saturation.setProgress(100);
                     crop.setCropEnabled(false);crop.setBitmapSize(result.getWidth(),result.getHeight());
-                    report.setText("AUTO PRO COMPLETO\n"+
-                        session.verdict+"\n\nRADDRIZZAMENTO: "+
+                    report.setText("AUTO PRO COMPLETO · VERDETTO RICALCOLATO\n"+
+                        finalVerdict+
+                        "\nDifferenza punteggio tecnico preview: "+(delta>=0?"+":"")+delta+"/100."+
+                        "\n\nRENDERING: "+session.best.plan.changes()+
+                        "\nRADDRIZZAMENTO: "+
                         (straight==candidate?"nessuna linea affidabile":"applicato con ritaglio protettivo")+
-                        "\nTONI: regolazione moderata di luci e ombre.\n"+
-                        "NESSUN dettaglio RAW ricreato o generato.");
+                        "\nTONI: regolazione moderata di luci e ombre."+
+                        "\nNessun dettaglio RAW ricreato o generato.");
                     caption.setText("AUTO PRO · "+session.best.plan.name+" · "+
-                        session.best.vote+"/10 (stima tecnica)");
+                        finalReview.score10+"/10 (stima tecnica post-elaborazione)");
                     refresh();beginAutoLesson();
                 });
             }catch(Exception e){ui.post(()->caption.setText("Auto Pro: "+e.getMessage()));}
