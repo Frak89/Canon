@@ -61,6 +61,7 @@ public final class EditorActivity extends Activity {
     private VisualInspector.Report inspection;
     private SubjectAi stillSubject;
     private String subjectDescription="Analisi soggetto non avviata";
+    private String subjectExplanation="Attendo il riconoscimento ML Kit per spiegare che cosa è stato rilevato.";
     private boolean showVisual=false;
     private AutoMasterEngine.Session masterSession;
     private AutoMasterEngine.Plan activePlan;
@@ -70,6 +71,9 @@ public final class EditorActivity extends Activity {
     private SeekBar brightness,contrast,saturation;
     private TextView caption,report,teacher,stepInfo;
     private boolean before=false, voice=false, playing=true;
+    private Button beforeButton,comparisonButton,overlayButton,playButton,voiceButton,autoLessonButton;
+    private Button applyCropButton,versionsButton;
+    private final ArrayList<Button> needsPhoto=new ArrayList<>();
     private TextToSpeech speech;
     private int lessonStep=0;
     private PhotoReview originalReview;
@@ -83,9 +87,36 @@ public final class EditorActivity extends Activity {
         t.setPadding(dp(8),dp(6),dp(8),dp(6));return t;
     }
     private Button button(String name,LinearLayout row,View.OnClickListener listener){
-        Button b=new Button(this);b.setText(name);b.setTextSize(12);b.setAllCaps(false);
-        b.setOnClickListener(listener);row.addView(b,new LinearLayout.LayoutParams(dp(125),dp(48)));
+        Button b=AmpyButtons.action(this,name);
+        b.setTextSize(12);b.setOnClickListener(listener);
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(148),dp(48));
+        p.setMargins(dp(3),dp(2),dp(3),dp(2));row.addView(b,p);
         return b;
+    }
+    private Button actionPhoto(String name,LinearLayout row,View.OnClickListener listener){
+        Button b=button(name,row,listener);
+        needsPhoto.add(b);
+        b.setEnabled(original!=null);
+        return b;
+    }
+    private Button toggleButton(String name,boolean on,LinearLayout row,View.OnClickListener listener){
+        Button b=AmpyButtons.toggle(this,name,on);
+        b.setTextSize(11);b.setOnClickListener(listener);
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(167),dp(48));
+        p.setMargins(dp(3),dp(2),dp(3),dp(2));row.addView(b,p);
+        return b;
+    }
+    private void updateButtonAvailability(){
+        boolean ready=original!=null;
+        for(Button b:needsPhoto)b.setEnabled(ready);
+        if(applyCropButton!=null)applyCropButton.setEnabled(ready&&crop!=null&&crop.isCropActive());
+        if(versionsButton!=null)versionsButton.setEnabled(masterSession!=null);
+        if(voiceButton!=null)AmpyButtons.setToggle(voiceButton,voice);
+        if(beforeButton!=null)AmpyButtons.setToggle(beforeButton,before);
+        if(comparisonButton!=null)AmpyButtons.setToggle(comparisonButton,compareOn);
+        if(overlayButton!=null)AmpyButtons.setToggle(overlayButton,showVisual);
+        if(playButton!=null)AmpyButtons.setToggle(playButton,playing);
+        if(autoLessonButton!=null)AmpyButtons.setToggle(autoLessonButton,autoLesson);
     }
     private LinearLayout row(LinearLayout container){
         HorizontalScrollView sc=new HorizontalScrollView(this);sc.setHorizontalScrollBarEnabled(false);
@@ -122,24 +153,30 @@ public final class EditorActivity extends Activity {
         LinearLayout tools=row(panel);
         button("APRI FOTO",tools,v->pick(false));
         button("SCEGLI MIGLIORE",tools,v->pick(true));
-        button("MASTER AI AUTO",tools,v->autoMaster());
-        button("AUTO PRO COMPLETO",tools,v->autoPro());
-        button("VERSIONI AI",tools,v->showVersions());
-        button("AUTO COMPONI",tools,v->autoCompose());
-        button("AUTO RADDRIZZA",tools,v->autoStraighten());
-        button("AUTO TONI",tools,v->autoTone());
-        button("AUTO RESIZE",tools,v->chooseResize());
-        button("ANALISI VISIVA",tools,v->showAnalysis());
-        button("OVERLAY TECNICO",tools,v->toggleTechnicalOverlay());
-        button("RITAGLIA",tools,v->chooseRatio());
-        button("APPLICA CROP",tools,v->applyCrop());
-        button("RUOTA 90°",tools,v->rotate());
-        button("SPECCHIO",tools,v->mirror());
-        button("PRIMA / DOPO",tools,v->toggleBefore());
-        button("SPLIT SCORREVOLE",tools,v->toggleComparison());
-        button("SPIEGA",tools,v->explain());
-        button("SALVA COPIA",tools,v->save());
-        button("RIPRISTINA",tools,v->restore());
+        actionPhoto("MASTER AI AUTO",tools,v->autoMaster());
+        actionPhoto("AUTO PRO COMPLETO",tools,v->autoPro());
+        versionsButton=actionPhoto("VERSIONI AI",tools,v->showVersions());
+        versionsButton.setEnabled(false);
+        actionPhoto("AUTO COMPONI",tools,v->autoCompose());
+        actionPhoto("AUTO RADDRIZZA",tools,v->autoStraighten());
+        actionPhoto("AUTO TONI",tools,v->autoTone());
+        actionPhoto("AUTO RESIZE",tools,v->chooseResize());
+        actionPhoto("ANALISI VISIVA",tools,v->showAnalysis());
+        overlayButton=toggleButton("OVERLAY TECNICO",false,tools,v->toggleTechnicalOverlay());
+        overlayButton.setEnabled(false);
+        needsPhoto.add(overlayButton);
+        actionPhoto("RITAGLIA",tools,v->chooseRatio());
+        applyCropButton=actionPhoto("APPLICA CROP",tools,v->applyCrop());
+        applyCropButton.setEnabled(false);
+        actionPhoto("RUOTA 90°",tools,v->rotate());
+        actionPhoto("SPECCHIO",tools,v->mirror());
+        beforeButton=toggleButton("ORIGINALE",false,tools,v->toggleBefore());
+        beforeButton.setEnabled(false);needsPhoto.add(beforeButton);
+        comparisonButton=toggleButton("SPLIT SCORREVOLE",false,tools,v->toggleComparison());
+        comparisonButton.setEnabled(false);needsPhoto.add(comparisonButton);
+        actionPhoto("SPIEGA",tools,v->explain());
+        actionPhoto("SALVA COPIA",tools,v->save());
+        actionPhoto("RIPRISTINA",tools,v->restore());
 
         LinearLayout lookRow=new LinearLayout(this);lookRow.setGravity(Gravity.CENTER_VERTICAL);
         lookRow.addView(txt("LOOK",12));
@@ -161,17 +198,25 @@ public final class EditorActivity extends Activity {
         LinearLayout classroom=row(panel);
         button("◀ INDIETRO",classroom,v->changeStep(-1));
         button("AVANTI ▶",classroom,v->changeStep(+1));
-        button("PLAY / PAUSA",classroom,v->{playing=!playing;if(playing)lesson.play();else lesson.pause();});
-        button("VOCE ON/OFF",classroom,v->{
+        playButton=toggleButton("ANIMAZIONI",playing,classroom,v->{
+            playing=!playing;if(playing)lesson.play();else lesson.pause();
+            updateButtonAvailability();
+        });
+        voice=getPreferences(MODE_PRIVATE).getBoolean("teacher_voice",true);
+        voiceButton=toggleButton("VOCE MAESTRO",voice,classroom,v->{
             voice=!voice;getPreferences(MODE_PRIVATE).edit().putBoolean("teacher_voice",voice).apply();
             caption.setText(voice?"LEZIONE VOCALE ATTIVA":"LEZIONE VOCALE DISATTIVA");
             if(!voice&&speech!=null)speech.stop();
             else say(teacher.getText().toString());
+            updateButtonAvailability();
         });
-        button("LEZIONE AUTOMATICA",classroom,v->beginAutoLesson());
+        autoLessonButton=toggleButton("LEZIONE AUTOMATICA",false,classroom,v->{
+            if(autoLesson)stopAutoLesson();else beginAutoLesson();
+            updateButtonAvailability();
+        });
         stepInfo=txt(steps[0],12);panel.addView(stepInfo);
-        voice=getPreferences(MODE_PRIVATE).getBoolean("teacher_voice",true);
         stillSubject=new SubjectAi();
+        updateButtonAvailability();
         speech=new TextToSpeech(this,code->{if(code==TextToSpeech.SUCCESS && speech!=null){
             speech.setLanguage(Locale.ITALIAN);speech.setSpeechRate(.92f);
         }});
@@ -240,16 +285,23 @@ public final class EditorActivity extends Activity {
                     masterSession=null;activePlan=null;
                     original=b;working=b;originalReview=r;inspection=visual;
                     subjectDescription="Ricerca di volti e oggetti sul Pixel…";
+                    subjectExplanation="Il modello sta analizzando questa fotografia.";
                     visualOverlay.setSubject(null,"");
                     visualOverlay.configure(visual,b.getWidth(),b.getHeight());
                     visualOverlay.setVisibility(View.GONE);showVisual=false;
                     if(stillSubject!=null)stillSubject.observe(b,observation->ui.post(()->{
                         if(closing||original!=b)return;
                         subjectDescription=observation.description;
+                        subjectExplanation=observation.explanation;
                         visualOverlay.setSubject(observation.normalizedBox,observation.description);
-                        report.setText("CHE COSA VEDO · "+subjectDescription+
+                        report.setText("SOGGETTO RILEVATO · "+subjectDescription+
+                            "\nSPIEGAZIONE · "+subjectExplanation+
                             "\nDATI TECNICI · "+visual.summary+
                             "\nPERCHÉ · "+r.why+"\nCOME · "+r.how);
+                        if(voice && autoLesson && lessonStep==0) {
+                            say(subjectExplanation);
+                            teacher.setText("MAESTRO · "+subjectExplanation);
+                        }
                     }));
                     selectedLook=r.look.look;
                     looks.setSelection(selectedLook.ordinal());
@@ -260,7 +312,7 @@ public final class EditorActivity extends Activity {
                     caption.setText("VALUTAZIONE INIZIALE: "+r.score10+"/10 · "+r.verdict);
                     report.setText("DATI VISIVI: "+visual.summary+
                         "\nPERCHÉ: "+r.why+"\nCOME: "+r.how);
-                    refresh();showStep(0);
+                    refresh();showStep(0);updateButtonAvailability();
                 });
             }catch(Exception e){ui.post(()->caption.setText("Caricamento fallito: "+e.getMessage()));}
         });
@@ -332,7 +384,7 @@ public final class EditorActivity extends Activity {
         Bitmap result=PhotoReview.crop(working,r);
         working=result;crop.setBitmapSize(result.getWidth(),result.getHeight());
         crop.setAspect(0);crop.setCropEnabled(false);
-        caption.setText("Ritaglio applicato alla copia di lavoro.");refresh();
+        caption.setText("Ritaglio applicato alla copia di lavoro.");refresh();updateButtonAvailability();
     }
     private void chooseRatio(){
         new AlertDialog.Builder(this).setTitle("Ritaglio manuale: trascina gli angoli")
@@ -340,6 +392,7 @@ public final class EditorActivity extends Activity {
                 if(working==null)return;
                 float[] ratios={0f,1f,4f/5f,3f/2f,16f/9f};
                 crop.setCropEnabled(true);crop.setAspect(ratios[i]);lesson.setVisibility(View.GONE);
+                updateButtonAvailability();
                 caption.setText("Ritaglio "+new String[]{"libero","1:1","4:5","3:2","16:9"}[i]
                     +" · trascina gli angoli e tocca APPLICA CROP");
             }).show();
@@ -370,6 +423,7 @@ public final class EditorActivity extends Activity {
         if(compareOn){compareOn=false;comparison.setVisibility(View.GONE);}
         if(showVisual)visualOverlay.setVisibility(View.GONE);
         before=!before;image.setImageBitmap(before?original:display);
+        updateButtonAvailability();
         crop.setVisibility(before?View.GONE:View.VISIBLE);
         lesson.setVisibility(before?View.GONE:View.VISIBLE);
         caption.setText(before?"ORIGINALE non modificato":"PROPOSTA in anteprima");
@@ -383,13 +437,14 @@ public final class EditorActivity extends Activity {
         selectedLook=ColorLooks.Look.NATURALE;looks.setSelection(0);
         brightness.setProgress(100);contrast.setProgress(100);saturation.setProgress(100);
         crop.setCropEnabled(false);crop.setBitmapSize(original.getWidth(),original.getHeight());
-        refresh();showStep(0);
+        refresh();showStep(0);updateButtonAvailability();
     }
     private void explain(){
         if(original==null||display==null)return;
         PhotoReview proposal=PhotoReview.inspect(display);
         String info=(inspection!=null?
-            inspection.fullReport()+"\n\nSOGGETTI (RICONOSCIMENTO ML KIT): "+subjectDescription+"\n\n":"")+
+            inspection.fullReport()+"\n\nSOGGETTO ML KIT: "+subjectDescription+
+            "\nSPIEGAZIONE DEL SOGGETTO: "+subjectExplanation+"\n\n":"")+
             (masterSession!=null?
              masterSession.verdict+"\n\n"+masterSession.nextShot+"\n\n":
              "")+PhotoReview.compare(originalReview,proposal)
@@ -415,8 +470,8 @@ public final class EditorActivity extends Activity {
         switch(lessonStep){
             case 0:
                 message="Osserva l'immagine originale. La prima valutazione è "+r.score10+
-                    " su dieci. "+r.verdict+". Ho rilevato: "+subjectDescription+
-                    ". "+(inspection==null?"":inspection.summary)+". "+r.why;
+                    " su dieci. "+r.verdict+". "+subjectExplanation+
+                    " "+(inspection==null?"":inspection.summary)+". "+r.why;
                 break;
             case 1:
                 message="Osserva le alte luci e le ombre. "+
@@ -467,6 +522,7 @@ public final class EditorActivity extends Activity {
                     if(closing||original!=source)return;
                     masterSession=session;
                     activePlan=session.best.plan;
+                    updateButtonAvailability();
                     working=output;before=false;
                     selectedLook=ColorLooks.Look.NATURALE;
                     looks.setSelection(0);
@@ -509,6 +565,7 @@ public final class EditorActivity extends Activity {
                 ui.post(()->{
                     if(closing||original!=source)return;
                     activePlan=c.plan;working=output;before=false;
+                    updateButtonAvailability();
                     selectedLook=ColorLooks.Look.NATURALE;looks.setSelection(0);
                     brightness.setProgress(100);contrast.setProgress(100);saturation.setProgress(100);
                     crop.setCropEnabled(false);crop.setBitmapSize(output.getWidth(),output.getHeight());
@@ -524,6 +581,7 @@ public final class EditorActivity extends Activity {
         if(original==null||display==null){caption.setText("Apri prima una foto.");return;}
         compareOn=!compareOn;
         comparison.setVisibility(compareOn?View.VISIBLE:View.GONE);
+        updateButtonAvailability();
         visualOverlay.setVisibility(View.GONE);
         if(compareOn){
             comparison.setImages(original,display);
@@ -537,6 +595,7 @@ public final class EditorActivity extends Activity {
     }
     private void stopAutoLesson() {
         autoLesson=false;
+        if(autoLessonButton!=null)AmpyButtons.setToggle(autoLessonButton,false);
         if(lessonAdvance!=null){ui.removeCallbacks(lessonAdvance);lessonAdvance=null;}
         if(speech!=null)speech.stop();
     }
@@ -548,6 +607,7 @@ public final class EditorActivity extends Activity {
         playing=true;voice=true;
         getPreferences(MODE_PRIVATE).edit().putBoolean("teacher_voice",true).apply();
         autoLesson=true;
+        updateButtonAvailability();
         showStep(0);
         scheduleNext();
     }
@@ -557,6 +617,7 @@ public final class EditorActivity extends Activity {
             if(closing||!autoLesson)return;
             if(lessonStep>=4){
                 autoLesson=false;
+                updateButtonAvailability();
                 if(original!=null&&display!=null){
                     compareOn=true;comparison.setImages(original,display);
                     comparison.setVisibility(View.VISIBLE);
@@ -575,7 +636,8 @@ public final class EditorActivity extends Activity {
     private void showAnalysis(){
         if(inspection==null){caption.setText("Carica una foto per vedere l'analisi.");return;}
         String message=inspection.fullReport()+"\n\nSOGGETTO RILEVATO CON ML KIT\n"+
-            subjectDescription+"\n\nPERCHÉ L'ORIGINALE PUÒ ESSERE MIGLIORATO\n"+
+            subjectDescription+"\n"+subjectExplanation+
+            "\n\nPERCHÉ L'ORIGINALE PUÒ ESSERE MIGLIORATO\n"+
             (originalReview==null?"":originalReview.why);
         new AlertDialog.Builder(this).setTitle("Analisi tecnica e compositiva")
             .setMessage(message)
@@ -585,9 +647,9 @@ public final class EditorActivity extends Activity {
                 lesson.setVisibility(View.GONE);
                 comparison.setVisibility(View.GONE);compareOn=false;
                 caption.setText("ARANCIO: dettaglio · TURCHESE: terzi · GIALLO: crop · VIOLA: possibile linea · VERDE: soggetto ML Kit");
-                voice=true;
+                voice=true;updateButtonAvailability();
                 say("Ora ti mostro la mappa dei dettagli. "+inspection.summary+". "+
-                    inspection.improvements+" Ho rilevato: "+subjectDescription);
+                    inspection.improvements+" "+subjectExplanation);
             })
             .setNegativeButton("CHIUDI",null).show();
     }
@@ -595,6 +657,7 @@ public final class EditorActivity extends Activity {
         if(inspection==null){caption.setText("Apri una fotografia.");return;}
         showVisual=!showVisual;
         visualOverlay.setVisibility(showVisual?View.VISIBLE:View.GONE);
+        updateButtonAvailability();
         if(showVisual){
             compareOn=false;comparison.setVisibility(View.GONE);
             lesson.setVisibility(View.GONE);
@@ -702,6 +765,7 @@ public final class EditorActivity extends Activity {
                     if(closing||original!=source)return;
                     masterSession=session;activePlan=session.best.plan;
                     working=result;before=false;compareOn=false;
+                    updateButtonAvailability();
                     comparison.setVisibility(View.GONE);
                     selectedLook=ColorLooks.Look.NATURALE;looks.setSelection(0);
                     brightness.setProgress(100);contrast.setProgress(100);saturation.setProgress(100);
