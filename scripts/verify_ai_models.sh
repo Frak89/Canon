@@ -23,7 +23,14 @@ if [ -z "$NAME" ]; then
   exit 1
 fi
 tar -xOzf "$TEMP/model.tgz" "$NAME" > "$TEMP/model.tflite"
-
+ARCHIVE_BYTES="$(stat -c '%s' "$TEMP/model.tgz")"
+MODEL_BYTES="$(stat -c '%s' "$TEMP/model.tflite")"
+LABEL_BYTES="$(stat -c '%s' "$TEMP/labels.txt")"
+echo "Official package sizes: archive=${ARCHIVE_BYTES} bytes model=${MODEL_BYTES} bytes labels=${LABEL_BYTES} bytes."
+# Match the Android app's new safety bounds; don't regress to a too-small cap.
+test "$ARCHIVE_BYTES" -le $((512*1024*1024))
+test "$MODEL_BYTES" -le $((256*1024*1024))
+test "$LABEL_BYTES" -le $((2*1024*1024))
 echo "$MODEL_HASH  $TEMP/model.tflite" | sha256sum -c -
 echo "$LABELS_HASH  $TEMP/labels.txt" | sha256sum -c -
 COUNT="$(awk 'NF { count++ } END { print count+0 }' "$TEMP/labels.txt")"
