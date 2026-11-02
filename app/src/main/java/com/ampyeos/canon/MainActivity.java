@@ -60,7 +60,7 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
     private final AtomicBoolean aiBusy=new AtomicBoolean(false);
     private SubjectAi subjectAi;
     private ExtraRecognition extraRecognition;
-    private Button extraToggle;
+    private Button extraToggle,mobileAiToggle;
     private TextView extraStatus;
     private long lastExtraRequest=0;
     private BleDiscovery bluetooth=new BleDiscovery();
@@ -201,7 +201,17 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
                 extraRecognition.setAutoEnabled(!extraRecognition.autoEnabled());
                 AmpyButtons.setToggle(extraToggle,extraRecognition.autoEnabled());
                 log(extraRecognition.autoEnabled()?
-                    "Download AI Wi-Fi attivato":"Download automatico AI disattivato");
+                    "Download AI automatico attivo (Wi-Fi"+
+                    (extraRecognition.allowMobileAuto()?" e 4G/5G":"")+").":
+                    "Download automatico AI disattivato");
+            });
+        mobileAiToggle=toggleButton("DATI MOBILI AI",
+            extraRecognition.allowMobileAuto(),actions,v->{
+                extraRecognition.setAllowMobileAuto(!extraRecognition.allowMobileAuto());
+                AmpyButtons.setToggle(mobileAiToggle,extraRecognition.allowMobileAuto());
+                log(extraRecognition.allowMobileAuto()?
+                    "Download AI automatico 4G/5G attivato (escluso roaming); attenzione ai GB":
+                    "Download AI automatico con dati mobili disattivato");
             });
         composerToggle=toggleButton("AUTO COMPOSER",autoCompose,actions,v->toggleComposer());
         lookToggle=toggleButton("AUTO LOOK",autoLook,actions,v->toggleAutoLook());
@@ -212,7 +222,9 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
         state=text("PIXEL · nessuna immagine inviata al cloud",11,0xff9badbd);
         panel.addView(diagnostics);panel.addView(state);
         extraStatus=text("AI EXTRA · "+ExtraRecognition.modelName()+
-            " · "+(extraRecognition.isCached()?"cache presente":"modello scaricabile su Wi-Fi"),11,0xff9de2cf);
+            " · "+(extraRecognition.isCached()?"cache presente":
+                "download Wi-Fi"+(extraRecognition.allowMobileAuto()?" / 4G-5G":"")),
+            11,0xff9de2cf);
         panel.addView(extraStatus);
         panel.addView(text("COLORI · MENTA CHIARO = ON · SCURO = OFF o NON DISPONIBILE · BLU = AZIONE",
             10,0xffb8d5e3));
