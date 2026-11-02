@@ -427,12 +427,19 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
         super.onActivityResult(requestCode,resultCode,data);
         if(requestCode==PICK_MODEL&&resultCode==RESULT_OK&&data!=null&&data.getData()!=null){
             extraStatus.setText("Importazione modello dalla cartella Download in corso…");
-            extraRecognition.importFromDevice(data.getData(),new ExtraRecognition.Callback(){
+            Bitmap currentFrame="PIXEL".equals(currentMode)?pixelView.getBitmap():null;
+            extraRecognition.importFromDevice(data.getData(),currentFrame,new ExtraRecognition.Callback(){
                 @Override public void status(String info){
                     if(!closing)extraStatus.setText(info);
                 }
                 @Override public void result(ExtraRecognition.Recognition result){
-                    if(!closing)extraStatus.setText(result.describe());
+                    if(!closing){
+                        extraStatus.setText(result.describe());
+                        if(result.recognized){
+                            aiText.setText("MODELLO IMPORTATO · "+result.label);
+                            currentSubjectSpoken=result.describe();
+                        }
+                    }
                 }
             });
         }
