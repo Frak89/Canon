@@ -1,6 +1,18 @@
-# AmpyEOS 0.4.1 — Technical Photography Master Classroom
+# AmpyEOS 0.5.0 — AI Model Auto-Download + Photography Master Classroom
 
 App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
+
+## Novità v0.5.0 · Ricerca soggetti con download di modelli AI
+
+- Quando il riconoscimento ML Kit non trova un soggetto utile, **su Wi-Fi** l'app scarica automaticamente **solo il modello AI** aggiuntivo MobileNetV2 e le relative etichette, non carica foto o altri dati personali su alcun server.
+- Modello ufficiale TensorFlow: `mobilenet_v2_1.0_224.tgz`, estratto in memoria privata dell'app e validato con SHA-256 del file TFLite. Etichette ufficiali ImageNet: 1001 voci incluso background, con SHA-256 verificato.
+- Il modello occupa circa 14 MB estratti e permette di classificare il soggetto dominante in una delle **circa 1.000 classi** del dataset ImageNet. Il risultato è una stima probabilistica con soglia minima e alternative; non riconosce qualsiasi oggetto immaginabile né fornisce una nuova bounding box.
+- Se non c'è Wi-Fi o la rete non è disponibile, viene mantenuta l'analisi ML Kit; il download può essere avviato anche manualmente con `RICONOSCIMENTO EXTRA` nell'editor o `RICONOSCI EXTRA` in Live.
+- Pulsante **DOWNLOAD EXTRA · ON/OFF** nel Live e **DOWNLOAD AI AUTOMATICO · ON/OFF** nell'editor: controlla il download automatico. Un modello già scaricato funziona offline.
+- Download limitato per dimensioni, HTTPS su host TensorFlow ufficiale, verifica SHA-256 prima di installare, cache privata, attesa di 30 minuti tra tentativi falliti, nessun download ripetuto a ogni frame.
+- MobileNetV2 elabora l'intera foto o un fotogramma ridotto e può sbagliare. La classificazione non dimostra l'identità di una persona, il significato della scena o la qualità artistica.
+
+Sorgenti ufficiali: https://storage.googleapis.com/download.tensorflow.org/models/tflite_11_05_08/mobilenet_v2_1.0_224.tgz e https://storage.googleapis.com/download.tensorflow.org/data/ImageNetLabels.txt
 
 ## Novità v0.4.1 · Il maestro spiega il soggetto + pulsanti semantici
 
