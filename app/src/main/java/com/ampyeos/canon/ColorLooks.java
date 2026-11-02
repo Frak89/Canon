@@ -118,6 +118,9 @@ public final class ColorLooks {
         }
         return m;
     }
+    public static ColorMatrixColorFilter filter(Look look) {
+        return new ColorMatrixColorFilter(matrix(look));
+    }
     public static Bitmap render(Bitmap source,Look look,float brightness,float contrast,float saturation){
         Bitmap out=Bitmap.createBitmap(source.getWidth(),source.getHeight(),Bitmap.Config.ARGB_8888);
         Canvas c=new Canvas(out);Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
