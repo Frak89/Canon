@@ -320,13 +320,19 @@ public final class EditorActivity extends Activity {
     }
     private void importModel(Uri selected){
         modelStatus.setText("IMPORTAZIONE: lettura del file selezionato…");
-        extraRecognition.importFromDevice(selected,new ExtraRecognition.Callback(){
+        extraRecognition.importFromDevice(selected,original,new ExtraRecognition.Callback(){
             @Override public void status(String info){
                 if(closing)return;
                 modelStatus.setText("IMPORTAZIONE · "+info);
             }
             @Override public void result(ExtraRecognition.Recognition result){
-                if(!closing)modelStatus.setText(result.describe());
+                if(closing)return;
+                modelStatus.setText(result.describe());
+                if(result.recognized) {
+                    subjectDescription="Classificazione MobileNet: "+result.label;
+                    subjectExplanation=result.describe();
+                    if(original!=null)report.setText("RICONOSCIMENTO EXTRA\\n"+subjectExplanation);
+                }
             }
         });
     }
