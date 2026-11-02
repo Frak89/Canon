@@ -59,6 +59,10 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
     private final AtomicBoolean canonLoop=new AtomicBoolean(false);
     private final AtomicBoolean aiBusy=new AtomicBoolean(false);
     private SubjectAi subjectAi;
+    private ExtraRecognition extraRecognition;
+    private Button extraToggle;
+    private TextView extraStatus;
+    private long lastExtraRequest=0;
     private BleDiscovery bluetooth=new BleDiscovery();
     private ComposerOverlay composer;
     private GuideOverlay guide;
@@ -92,6 +96,7 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
         super.onCreate(b);
         getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
         subjectAi=new SubjectAi();
+        extraRecognition=new ExtraRecognition(this);
         sensors=(SensorManager)getSystemService(SENSOR_SERVICE);
         accelerometer=sensors==null?null:sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         voice=getPreferences(MODE_PRIVATE).getBoolean("voice",false);
@@ -190,6 +195,14 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
         recordButton.setEnabled(false);
         button("EDIT / AULA",actions,v->openEditor());
         button("CLASSIFICA FOTO",actions,v->rankPhotos());
+        button("RICONOSCI EXTRA",actions,v->tryExtraLive(false,null));
+        extraToggle=toggleButton("DOWNLOAD EXTRA",
+            extraRecognition.autoEnabled(),actions,v->{
+                extraRecognition.setAutoEnabled(!extraRecognition.autoEnabled());
+                AmpyButtons.setToggle(extraToggle,extraRecognition.autoEnabled());
+                log(extraRecognition.autoEnabled()?
+                    "Download AI Wi-Fi attivato":"Download automatico AI disattivato");
+            });
         composerToggle=toggleButton("AUTO COMPOSER",autoCompose,actions,v->toggleComposer());
         lookToggle=toggleButton("AUTO LOOK",autoLook,actions,v->toggleAutoLook());
         voiceToggle=toggleButton("VOCE MAESTRO",voice,actions,v->toggleVoice());
@@ -198,6 +211,9 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
         diagnostics=text("CANON: non collegata",11,0xffabc7d4);
         state=text("PIXEL · nessuna immagine inviata al cloud",11,0xff9badbd);
         panel.addView(diagnostics);panel.addView(state);
+        extraStatus=text("AI EXTRA · "+ExtraRecognition.modelName()+
+            " · "+(extraRecognition.isCached()?"cache presente":"modello scaricabile su Wi-Fi"),11,0xff9de2cf);
+        panel.addView(extraStatus);
         panel.addView(text("COLORI · MENTA CHIARO = ON · SCURO = OFF o NON DISPONIBILE · BLU = AZIONE",
             10,0xffb8d5e3));
     }
@@ -270,6 +286,8 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
                                 aiBusy.set(false);
                                 ui.post(()->{if(!closing && "PIXEL".equals(currentMode)){
                                     aiText.setText(message);currentSubjectSpoken=message;
+                                    if(!message.contains("volto")&&!message.contains("volti"))
+                                        tryExtraLive(true,null);
                                 }});
                             });
                         }
@@ -327,6 +345,8 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
                                 aiBusy.set(false);
                                 ui.post(()->{if(!closing && "CANON".equals(currentMode)){
                                     aiText.setText(message);currentSubjectSpoken=message;
+                                    if(!message.contains("volto")&&!message.contains("volti"))
+                                        tryExtraLive(true,frame);
                                 }});
                             });
                         }
@@ -373,6 +393,50 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
                     .setPositiveButton("Connetti",(d,w)->connectCanon(ip+":8080"))
                     .setNegativeButton("Annulla",null).show();});
             }catch(Exception e){log("Discovery: "+e.getMessage());}
+        });
+    }
+
+
+    private void tryExtraLive(boolean automatic,Bitmap remoteFrame){
+        if(extraRecognition==null||extraRecognition.isWorking())return;
+        if(automatic&&!extraRecognition.autoEnabled())return;
+        long now=android.os.SystemClock.elapsedRealtime();
+        // Do not run inference every video frame or start many downloads.
+        if(automatic&&now-lastExtraRequest<22000)return;
+        Bitmap bitmap=remoteFrame;
+        if(bitmap==null)bitmap=pixelView==null?null:pixelView.getBitmap();
+        if(bitmap==null) {
+            if(!automatic)log("Nessun fotogramma disponibile per il riconoscimento extra");
+            return;
+        }
+        lastExtraRequest=now;
+        final String mode=currentMode;
+        final Bitmap sample;
+        // Limit holding Pixel/Canon full-resolution frames for background inference.
+        int max=Math.max(bitmap.getWidth(),bitmap.getHeight());
+        if(max>512) {
+            float factor=512f/max;
+            sample=Bitmap.createScaledBitmap(bitmap,
+                Math.max(1,Math.round(bitmap.getWidth()*factor)),
+                Math.max(1,Math.round(bitmap.getHeight()*factor)),true);
+        } else {
+            sample=Bitmap.createBitmap(bitmap);
+        }
+        extraRecognition.classify(sample,automatic,new ExtraRecognition.Callback(){
+            @Override public void status(String msg) {
+                if(closing||!mode.equals(currentMode))return;
+                extraStatus.setText("AI EXTRA · "+msg);
+            }
+            @Override public void result(ExtraRecognition.Recognition r) {
+                if(closing||!mode.equals(currentMode))return;
+                extraStatus.setText(r.describe());
+                if(r.recognized) {
+                    currentSubjectSpoken=r.describe();
+                    aiText.setText("AI EXTRA · "+r.label+
+                        String.format(java.util.Locale.ITALIAN," · %.0f%%",r.confidence*100));
+                }
+                // The fallback provides a scene classification, not a bounding box.
+            }
         });
     }
 
@@ -536,6 +600,7 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
         analysisExecutor.shutdownNow();networkExecutor.shutdown();commandExecutor.shutdown();
         bluetooth.stop();if(speech!=null){speech.stop();speech.shutdown();}
         if(subjectAi!=null && !aiBusy.get())subjectAi.close();
+        if(extraRecognition!=null)extraRecognition.close();
         super.onDestroy();
     }
 }
