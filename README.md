@@ -1,4 +1,4 @@
-# AmpyEOS 0.3.0 — Autonomous Master Classroom
+# AmpyEOS 0.4.0 — Technical Photography Master Classroom
 
 App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
 
@@ -21,6 +21,16 @@ App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
 - Informazioni diagnostiche di rete e possibili capacità (batteria, impostazioni, ecc.).
 - Scorciatoia per aprire AmpyLink se installata.
 - **Nessuna modifica firmware, no overclock, nessuna esecuzione Lua sulla fotocamera, nessun pairing BLE automatico ancora.**
+
+### Rev0.4 · Analisi visiva e correzioni automatiche
+- **AUTO PRO COMPLETO**: rendering migliore secondo metriche tecniche locali, AutoStraighten prudente e AutoTone JPEG (senza recupero RAW), avvio lezione automatica.
+- **ANALISI VISIVA**: luminanza, ombre, zone chiare, dettagli, bilanciamento sinistra-destra, distanza dei contorni dai punti dei terzi, possibile linea quasi orizzontale, spiegazioni verificabili.
+- **OVERLAY TECNICO**: heatmap arancio delle strutture, griglia turchese, ritaglio giallo, possibile linea viola, regione verde se ML Kit rileva un volto/oggetto.
+- **AUTO RADDRIZZA**: evita interventi se la linea candidata è troppo incerta; non è una vera correzione prospettica.
+- **AUTO TONI**: curva prudente pixel-space per schiarire ombre e attenuare zone molto luminose, senza inventare dettagli.
+- **AUTO RESIZE**: 2048px web e formati 1080×1080, 1080×1350, 1080×1920, 1920×1080 con scelta riempi/letterbox.
+- **Riconoscimento oggetti/volti sulle foto importate**: inferenza ML Kit integrata sul Pixel, non invio cloud.
+- Specifica completa (schermate, pulsanti, algoritmi, limiti, prove): [docs/AmpyEOS_Rev04_Specifica.md](docs/AmpyEOS_Rev04_Specifica.md).
 
 ### Master AI Auto Render (Rev0.3)
 - **MASTER AI AUTO** produce 9 proposte locali a partire dalla foto: originale, esposizione bilanciata, composizione guidata, bianco e nero, bianco e nero ad alto contrasto, cinema, vintage, ritratto morbido e colori intensi.
