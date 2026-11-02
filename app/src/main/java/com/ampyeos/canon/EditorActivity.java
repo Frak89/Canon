@@ -60,6 +60,10 @@ public final class EditorActivity extends Activity {
     private VisualInspectorOverlay visualOverlay;
     private VisualInspector.Report inspection;
     private SubjectAi stillSubject;
+    private ExtraRecognition extraRecognition;
+    private Button extraAiToggle;
+    private TextView modelStatus;
+    private int extraRequests=0;
     private String subjectDescription="Analisi soggetto non avviata";
     private String subjectExplanation="Attendo il riconoscimento ML Kit per spiegare che cosa è stato rilevato.";
     private boolean showVisual=false;
@@ -150,6 +154,19 @@ public final class EditorActivity extends Activity {
         scroller.addView(panel);
         TextView legend=txt("MENTA CHIARO = TOGGLE ON · SCURO = OFF/NON DISPONIBILE · BLU = AZIONE",11);
         legend.setTextColor(0xffb8d5e3);panel.addView(legend);
+        extraRecognition=new ExtraRecognition(this);
+        LinearLayout modelActions=row(panel);
+        extraAiToggle=toggleButton("DOWNLOAD AI AUTOMATICO",extraRecognition.autoEnabled(),
+            modelActions,v->{
+                extraRecognition.setAutoEnabled(!extraRecognition.autoEnabled());
+                AmpyButtons.setToggle(extraAiToggle,extraRecognition.autoEnabled());
+                modelStatus.setText(extraRecognition.autoEnabled()?
+                    "AI EXTRA: download automatico Wi-Fi attivo se ML Kit non riconosce il soggetto":
+                    "AI EXTRA: download automatico disattivato; avvio manuale disponibile");
+            });
+        modelStatus=txt("AI EXTRA · "+ExtraRecognition.modelName()+
+            " · "+(extraRecognition.isCached()?"modello in cache":"download solo se necessario"),12);
+        modelStatus.setTextColor(0xff8debd2);panel.addView(modelStatus);
         caption=txt("Apri una foto oppure confronta più scatti.",13);caption.setTextColor(CYAN);panel.addView(caption);
         report=txt("L'originale non viene mai sovrascritto.",12);panel.addView(report);
         LinearLayout tools=row(panel);
@@ -164,6 +181,7 @@ public final class EditorActivity extends Activity {
         actionPhoto("AUTO TONI",tools,v->autoTone());
         actionPhoto("AUTO RESIZE",tools,v->chooseResize());
         actionPhoto("ANALISI VISIVA",tools,v->showAnalysis());
+        actionPhoto("RICONOSCIMENTO EXTRA",tools,v->runExtraRecognition(false));
         overlayButton=toggleButton("OVERLAY TECNICO",false,tools,v->toggleTechnicalOverlay());
         overlayButton.setEnabled(false);
         needsPhoto.add(overlayButton);
@@ -288,6 +306,7 @@ public final class EditorActivity extends Activity {
                     original=b;working=b;originalReview=r;inspection=visual;
                     subjectDescription="Ricerca di volti e oggetti sul Pixel…";
                     subjectExplanation="Il modello sta analizzando questa fotografia.";
+                    extraRequests++;
                     visualOverlay.setSubject(null,"");
                     visualOverlay.configure(visual,b.getWidth(),b.getHeight());
                     visualOverlay.setVisibility(View.GONE);showVisual=false;
@@ -303,6 +322,11 @@ public final class EditorActivity extends Activity {
                         if(voice && autoLesson && lessonStep==0) {
                             say(subjectExplanation);
                             teacher.setText("MAESTRO · "+subjectExplanation);
+                        }
+                        String details=observation.description.toLowerCase(java.util.Locale.ROOT);
+                        if(observation.normalizedBox==null ||
+                            (!details.contains("volto")&&!details.contains("volti"))) {
+                            runExtraRecognition(true);
                         }
                     }));
                     selectedLook=r.look.look;
@@ -636,10 +660,48 @@ public final class EditorActivity extends Activity {
     }
 
 
+
+    /** Fallback triggers only on still photos when ML Kit cannot describe the subject. */
+    private void runExtraRecognition(boolean automatic){
+        Bitmap image=original;
+        if(image==null)return;
+        if(extraRecognition==null || extraRecognition.isWorking())return;
+        if(automatic&&!extraRecognition.autoEnabled())return;
+        final int generation=extraRequests;
+        extraRecognition.classify(image,automatic,new ExtraRecognition.Callback(){
+            @Override public void status(String message){
+                if(closing||original!=image||generation!=extraRequests)return;
+                modelStatus.setText("AI EXTRA · "+message);
+            }
+            @Override public void result(ExtraRecognition.Recognition result){
+                if(closing||original!=image||generation!=extraRequests)return;
+                String guess=result.describe();
+                modelStatus.setText(guess);
+                if(result.recognized){
+                    // Preserve the original ML Kit localization when present.
+                    subjectDescription="Modello aggiuntivo: "+result.label;
+                    subjectExplanation=guess;
+                    report.setText("SOGGETTO ML KIT / MOBILE NET\n"+
+                        subjectExplanation+"\n\n"+
+                        (inspection==null?"":inspection.summary)+"\n"+
+                        (originalReview==null?"":originalReview.how));
+                    if(voice&&autoLesson && lessonStep==0) {
+                        teacher.setText("MAESTRO · "+guess);
+                        say(guess);
+                    }
+                }else{
+                    report.setText("AI EXTRA · "+guess+"\n\n"+
+                        (inspection==null?"":inspection.summary));
+                }
+            }
+        });
+    }
+
     private void showAnalysis(){
         if(inspection==null){caption.setText("Carica una foto per vedere l'analisi.");return;}
         String message=inspection.fullReport()+"\n\nSOGGETTO RILEVATO CON ML KIT\n"+
             subjectDescription+"\n"+subjectExplanation+
+            "\nMODELLO AGGIUNTIVO: "+modelStatus.getText()+
             "\n\nPERCHÉ L'ORIGINALE PUÒ ESSERE MIGLIORATO\n"+
             (originalReview==null?"":originalReview.why);
         new AlertDialog.Builder(this).setTitle("Analisi tecnica e compositiva")
@@ -812,6 +874,7 @@ public final class EditorActivity extends Activity {
         closing=true;stopAutoLesson();
         if(speech!=null){speech.stop();speech.shutdown();}
         if(stillSubject!=null)stillSubject.close();
+        if(extraRecognition!=null)extraRecognition.close();
         worker.shutdownNow();
         super.onDestroy();
     }
