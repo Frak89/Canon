@@ -321,7 +321,10 @@ public final class ExtraRecognition {
         File tmpLabels=new File(directory,"labels.partial");
         try{
             download(MODEL_ARCHIVE,archive,MAX_ARCHIVE_BYTES,cb,"modello");
+            notifyStatus(cb,"Download completo. Estraggo solo il modello TFLite; "+
+                "gli altri file di addestramento dell'archivio vengono ignorati.");
             extractModel(archive,tmpModel);
+            notifyStatus(cb,"Modello estratto: verifico integrità SHA-256.");
             if(!verifyHash(tmpModel,MODEL_SHA256))
                 throw new IOException("SHA-256 del modello errato: download rifiutato");
             download(LABELS_URL,tmpLabels,MAX_LABELS_BYTES,cb,"etichette");
