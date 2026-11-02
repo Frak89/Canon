@@ -7,8 +7,8 @@ android {
         applicationId = "com.ampyeos.canon"
         minSdk = 30
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.4.1"
+        versionCode = 6
+        versionName = "0.5.0"
     }
     buildTypes {
         release { isMinifyEnabled = false }
@@ -28,4 +28,5 @@ dependencies {
     implementation("androidx.camera:camera-view:1.6.2")
     implementation("com.google.mlkit:face-detection:16.1.7")
     implementation("com.google.mlkit:object-detection:17.0.2")
+    implementation("org.tensorflow:tensorflow-lite:2.17.0")
 }
