@@ -56,6 +56,11 @@ public final class EditorActivity extends Activity {
     private ImageView image;
     private CropView crop;
     private LessonOverlay lesson;
+    private BeforeAfterView comparison;
+    private AutoMasterEngine.Session masterSession;
+    private AutoMasterEngine.Plan activePlan;
+    private boolean compareOn=false,autoLesson=false;
+    private Runnable lessonAdvance;
     private Spinner looks;
     private SeekBar brightness,contrast,saturation;
     private TextView caption,report,teacher,stepInfo;
@@ -97,6 +102,9 @@ public final class EditorActivity extends Activity {
         area.addView(crop,new FrameLayout.LayoutParams(-1,-1));
         lesson=new LessonOverlay(this);
         area.addView(lesson,new FrameLayout.LayoutParams(-1,-1));
+        comparison=new BeforeAfterView(this);
+        comparison.setVisibility(View.GONE);
+        area.addView(comparison,new FrameLayout.LayoutParams(-1,-1));
         ScrollView scroller=new ScrollView(this);
         root.addView(scroller,new LinearLayout.LayoutParams(-1,dp(370)));
         LinearLayout panel=new LinearLayout(this);panel.setOrientation(LinearLayout.VERTICAL);
@@ -106,12 +114,15 @@ public final class EditorActivity extends Activity {
         LinearLayout tools=row(panel);
         button("APRI FOTO",tools,v->pick(false));
         button("SCEGLI MIGLIORE",tools,v->pick(true));
+        button("MASTER AI AUTO",tools,v->autoMaster());
+        button("VERSIONI AI",tools,v->showVersions());
         button("AUTO COMPONI",tools,v->autoCompose());
         button("RITAGLIA",tools,v->chooseRatio());
         button("APPLICA CROP",tools,v->applyCrop());
         button("RUOTA 90°",tools,v->rotate());
         button("SPECCHIO",tools,v->mirror());
         button("PRIMA / DOPO",tools,v->toggleBefore());
+        button("SPLIT SCORREVOLE",tools,v->toggleComparison());
         button("SPIEGA",tools,v->explain());
         button("SALVA COPIA",tools,v->save());
         button("RIPRISTINA",tools,v->restore());
@@ -137,9 +148,18 @@ public final class EditorActivity extends Activity {
         button("◀ INDIETRO",classroom,v->changeStep(-1));
         button("AVANTI ▶",classroom,v->changeStep(+1));
         button("PLAY / PAUSA",classroom,v->{playing=!playing;if(playing)lesson.play();else lesson.pause();});
-        button("VOCE ON/OFF",classroom,v->{voice=!voice;caption.setText(voice?"LEZIONE VOCALE ATTIVA":"LEZIONE VOCALE DISATTIVA");say(teacher.getText().toString());});
+        button("VOCE ON/OFF",classroom,v->{
+            voice=!voice;getPreferences(MODE_PRIVATE).edit().putBoolean("teacher_voice",voice).apply();
+            caption.setText(voice?"LEZIONE VOCALE ATTIVA":"LEZIONE VOCALE DISATTIVA");
+            if(!voice&&speech!=null)speech.stop();
+            else say(teacher.getText().toString());
+        });
+        button("LEZIONE AUTOMATICA",classroom,v->beginAutoLesson());
         stepInfo=txt(steps[0],12);panel.addView(stepInfo);
-        speech=new TextToSpeech(this,code->{if(code==TextToSpeech.SUCCESS && speech!=null)speech.setLanguage(Locale.ITALIAN);});
+        voice=getPreferences(MODE_PRIVATE).getBoolean("teacher_voice",true);
+        speech=new TextToSpeech(this,code->{if(code==TextToSpeech.SUCCESS && speech!=null){
+            speech.setLanguage(Locale.ITALIAN);speech.setSpeechRate(.92f);
+        }});
         String incoming=getIntent().getStringExtra("image_uri");
         if(incoming!=null)load(Uri.parse(incoming));
         else if(getIntent().getData()!=null)load(getIntent().getData());
@@ -200,6 +220,8 @@ public final class EditorActivity extends Activity {
                 PhotoReview r=PhotoReview.inspect(b);
                 ui.post(()->{
                     if(closing)return;
+                    stopAutoLesson();comparison.setVisibility(View.GONE);compareOn=false;
+                    masterSession=null;activePlan=null;
                     original=b;working=b;originalReview=r;
                     selectedLook=r.look.look;
                     looks.setSelection(selectedLook.ordinal());
@@ -266,6 +288,7 @@ public final class EditorActivity extends Activity {
                     if(closing||generation.get()!=generationNow)return;
                     display=edited;
                     image.setImageBitmap(before?original:edited);
+                    if(compareOn && original!=null)comparison.setImages(original,edited);
                     crop.setBitmapSize((before?original:edited).getWidth(),(before?original:edited).getHeight());
                     lesson.configure(edited.getWidth(),edited.getHeight(),PhotoReview.autoCrop(edited));
                 });
@@ -313,6 +336,7 @@ public final class EditorActivity extends Activity {
     }
     private void toggleBefore(){
         if(original==null)return;
+        if(compareOn){compareOn=false;comparison.setVisibility(View.GONE);}
         before=!before;image.setImageBitmap(before?original:display);
         crop.setVisibility(before?View.GONE:View.VISIBLE);
         lesson.setVisibility(before?View.GONE:View.VISIBLE);
@@ -320,6 +344,8 @@ public final class EditorActivity extends Activity {
     }
     private void restore(){
         if(original==null)return;
+        stopAutoLesson();compareOn=false;comparison.setVisibility(View.GONE);
+        masterSession=null;activePlan=null;
         working=original;before=false;
         selectedLook=ColorLooks.Look.NATURALE;looks.setSelection(0);
         brightness.setProgress(100);contrast.setProgress(100);saturation.setProgress(100);
@@ -329,7 +355,9 @@ public final class EditorActivity extends Activity {
     private void explain(){
         if(original==null||display==null)return;
         PhotoReview proposal=PhotoReview.inspect(display);
-        String info=PhotoReview.compare(originalReview,proposal)
+        String info=(masterSession!=null?
+             masterSession.verdict+"\n\n"+masterSession.nextShot+"\n\n":
+             "")+PhotoReview.compare(originalReview,proposal)
             +"\n\nPERCHÉ L'ORIGINALE PUÒ ESSERE MIGLIORATO:\n"+originalReview.why
             +"\n\nCOS'HO CAMBIATO:\n"+originalReview.comparison
             +"\n\nCOME MIGLIORARE IL PROSSIMO SCATTO:\n"+originalReview.how;
@@ -350,19 +378,33 @@ public final class EditorActivity extends Activity {
         String message;
         switch(lessonStep){
             case 0:
-                message="Osserva la griglia: cerca il soggetto e decidi se preferisci simmetria oppure regola dei terzi. Valutazione tecnica originale "+r.score10+"/10.";
+                message="Osserva l'immagine originale. La prima valutazione è "+r.score10+
+                    " su dieci. "+r.verdict+". "+r.why;
                 break;
             case 1:
-                message="Qui osserviamo le zone luminose. "+r.why+" La correzione non può recuperare dettagli realmente bruciati.";
+                message="Osserva le alte luci e le ombre. "+r.how+
+                    " Ricorda: le correzioni JPEG non recuperano dettagli mai registrati.";
                 break;
             case 2:
-                message="Guarda il rettangolo che si muove: è un ritaglio suggerito dall'energia dei contorni. Puoi cambiare la proposta manualmente.";
+                message="Guarda il movimento del rettangolo: ti illustro il ritaglio proposto "+
+                    "per concentrare l'attenzione. Questa scelta non è sempre migliore: "+
+                    "un'immagine può beneficiare anche di uno sfondo ampio e della simmetria.";
                 break;
             case 3:
-                message="Sposta il colore con i controlli. Il look consigliato è "+r.look.look.label+": "+r.look.reason+". Il gusto personale resta decisivo.";
+                message=masterSession!=null?
+                    "Ho prodotto più versioni usando filtri e livelli tonali. "+
+                    masterSession.best.plan.changes()+
+                    ". Puoi selezionare un'altra versione usando il pulsante VERSIONI AI.":
+                    "Il look consigliato è "+r.look.look.label+": "+r.look.reason+
+                    ". Puoi intervenire manualmente sui controlli. Il gusto personale resta decisivo.";
                 break;
             default:
-                message="Confronta originale e proposta con PRIMA / DOPO, poi tocca SPIEGA per leggere che cosa è migliorato e cosa no.";
+                message=masterSession!=null?
+                    "Il mio verdetto finale: "+masterSession.verdict+
+                    " Per il prossimo scatto, "+masterSession.nextShot+
+                    " Usa SPLIT SCORREVOLE per confrontare le due immagini.":
+                    "Confronta originale e proposta con SPLIT SCORREVOLE; "+
+                    "il voto è un'indicazione tecnica, non un giudizio artistico assoluto.";
                 break;
         }
         teacher.setText("MAESTRO · "+message);say(message);
@@ -371,6 +413,123 @@ public final class EditorActivity extends Activity {
     private void say(String text){
         if(voice&&speech!=null)speech.speak(text,TextToSpeech.QUEUE_FLUSH,null,"lesson-"+lessonStep);
     }
+
+    /** Local autonomous multi-variant renderer. Never edits the source Uri or camera RAW. */
+    private void autoMaster(){
+        if(original==null){caption.setText("Carica prima una fotografia.");return;}
+        stopAutoLesson();
+        compareOn=false;comparison.setVisibility(View.GONE);
+        caption.setText("MASTER AI · elaboro 9 versioni e confronto i risultati in locale…");
+        Bitmap source=original;
+        worker.execute(()->{
+            try{
+                AutoMasterEngine.Session session=AutoMasterEngine.analyze(source);
+                Bitmap output=AutoMasterEngine.render(source,session.best.plan);
+                ui.post(()->{
+                    if(closing||original!=source)return;
+                    masterSession=session;
+                    activePlan=session.best.plan;
+                    working=output;before=false;
+                    selectedLook=ColorLooks.Look.NATURALE;
+                    looks.setSelection(0);
+                    brightness.setProgress(100);contrast.setProgress(100);saturation.setProgress(100);
+                    crop.setCropEnabled(false);
+                    crop.setBitmapSize(output.getWidth(),output.getHeight());
+                    lesson.configure(output.getWidth(),output.getHeight(),session.best.plan.rect);
+                    caption.setText("MASTER AI · "+session.best.plan.name+
+                        " · punteggio euristico "+session.best.vote+"/10");
+                    report.setText("VERDETTO\n"+session.verdict+
+                        "\n\nMODIFICHE\n"+session.best.plan.changes()+
+                        "\n\nPROSSIMO SCATTO\n"+session.nextShot);
+                    refresh();
+                    beginAutoLesson();
+                });
+            }catch(Exception e){ui.post(()->caption.setText("Rendering AI non riuscito: "+e.getMessage()));}
+        });
+    }
+    private void showVersions(){
+        AutoMasterEngine.Session session=masterSession;
+        if(session==null){caption.setText("Usa prima MASTER AI AUTO per generare le varianti.");return;}
+        String[] items=new String[session.ranked.size()];
+        for(int i=0;i<items.length;i++) {
+            AutoMasterEngine.Candidate c=session.ranked.get(i);
+            items[i]=(c==session.best?"★ ":"")+c.plan.name+" · "+
+                String.format(Locale.ITALIAN,"%.1f/100",c.quality);
+        }
+        new AlertDialog.Builder(this).setTitle("Seleziona una versione renderizzata")
+            .setMessage("Le proposte sono ordinate da una metrica tecnica euristica, non dal gusto artistico.")
+            .setItems(items,(d,index)->applyVariant(session.ranked.get(index)))
+            .setNegativeButton("CHIUDI",null).show();
+    }
+    private void applyVariant(AutoMasterEngine.Candidate c){
+        Bitmap source=original;
+        if(source==null)return;
+        caption.setText("Rendering versione "+c.plan.name+"…");
+        worker.execute(()->{
+            try{
+                Bitmap output=AutoMasterEngine.render(source,c.plan);
+                ui.post(()->{
+                    if(closing||original!=source)return;
+                    activePlan=c.plan;working=output;before=false;
+                    selectedLook=ColorLooks.Look.NATURALE;looks.setSelection(0);
+                    brightness.setProgress(100);contrast.setProgress(100);saturation.setProgress(100);
+                    crop.setCropEnabled(false);crop.setBitmapSize(output.getWidth(),output.getHeight());
+                    caption.setText("Versione "+c.plan.name+" · voto tecnico stimato "+c.vote+"/10");
+                    report.setText("PERCHÉ QUESTA VERSIONE\n"+c.rationale+
+                        "\n\nMODIFICHE\n"+c.plan.changes());
+                    refresh();
+                });
+            }catch(Exception e){ui.post(()->caption.setText("Errore variante: "+e.getMessage()));}
+        });
+    }
+    private void toggleComparison(){
+        if(original==null||display==null){caption.setText("Apri prima una foto.");return;}
+        compareOn=!compareOn;
+        comparison.setVisibility(compareOn?View.VISIBLE:View.GONE);
+        if(compareOn){
+            comparison.setImages(original,display);
+            lesson.setVisibility(View.GONE);
+            crop.setCropEnabled(false);
+            caption.setText("Trascina la linea: originale a sinistra, proposta a destra.");
+        }else{
+            lesson.setVisibility(View.VISIBLE);
+            caption.setText("Confronto chiuso. Puoi modificare la proposta.");
+        }
+    }
+    private void stopAutoLesson() {
+        autoLesson=false;
+        if(lessonAdvance!=null){ui.removeCallbacks(lessonAdvance);lessonAdvance=null;}
+        if(speech!=null)speech.stop();
+    }
+    private void beginAutoLesson(){
+        if(original==null){caption.setText("Carica una fotografia per la lezione.");return;}
+        stopAutoLesson();
+        compareOn=false;comparison.setVisibility(View.GONE);
+        playing=true;voice=true;
+        getPreferences(MODE_PRIVATE).edit().putBoolean("teacher_voice",true).apply();
+        autoLesson=true;
+        showStep(0);
+        scheduleNext();
+    }
+    private void scheduleNext(){
+        if(!autoLesson)return;
+        lessonAdvance=()->{
+            if(closing||!autoLesson)return;
+            if(lessonStep>=4){
+                autoLesson=false;
+                if(original!=null&&display!=null){
+                    compareOn=true;comparison.setImages(original,display);
+                    comparison.setVisibility(View.VISIBLE);
+                    lesson.setVisibility(View.GONE);
+                }
+                return;
+            }
+            showStep(lessonStep+1);
+            scheduleNext();
+        };
+        ui.postDelayed(lessonAdvance,11500);
+    }
+
     private void save(){
         if(display==null){caption.setText("Nessuna immagine da salvare");return;}
         Bitmap captured=display;
@@ -391,7 +550,7 @@ public final class EditorActivity extends Activity {
         });
     }
     @Override protected void onDestroy(){
-        closing=true;
+        closing=true;stopAutoLesson();
         if(speech!=null){speech.stop();speech.shutdown();}
         worker.shutdownNow();
         super.onDestroy();
