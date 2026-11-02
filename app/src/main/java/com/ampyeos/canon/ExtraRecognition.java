@@ -32,7 +32,6 @@ import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.zip.GZIPInputStream;
 
 /**
  * Optional on-device ImageNet fallback. It downloads ONLY the official model and
@@ -372,71 +371,11 @@ public final class ExtraRecognition {
             }
         }finally{con.disconnect();}
     }
-    /** Minimal bounded tar.gz extractor. Ignores all archive paths except the exact TFLite filename. */
-    private static void extractModel(File archive,File output)throws IOException{
-        try(InputStream in=new GZIPInputStream(new BufferedInputStream(new FileInputStream(archive)))){
-            byte[] header=new byte[512];long scanned=0;
-            while(true){
-                int got=readBlock(in,header);
-                if(got==0)break;
-                if(got!=512)throw new IOException("Archivio tar troncato");
-                scanned+=512;
-                boolean zero=true;for(byte c:header)if(c!=0){zero=false;break;}
-                if(zero)break;
-                String name=tarName(header);
-                long size=tarSize(header);
-                if(size<0||size>MAX_MODEL_BYTES||scanned>80L*1024*1024)
-                    throw new IOException("Voce archivio fuori limiti");
-                boolean modelEntry=name.equals(MODEL_ENTRY)||name.endsWith("/"+MODEL_ENTRY);
-                if(modelEntry){
-                    if(size<2_000_000)throw new IOException("Modello troppo piccolo");
-                    try(OutputStream out=new BufferedOutputStream(new FileOutputStream(output))){
-                        copyExactly(in,out,size);
-                    }
-                }else skipExactly(in,size);
-                long padding=(512-size%512)%512;
-                skipExactly(in,padding);
-                scanned+=size+padding;
-                if(modelEntry)return;
-            }
-        }
-        throw new IOException("File TFLite non presente nell'archivio ufficiale");
+    /** Streaming extractor also exercised against the actual TensorFlow archive in CI. */
+    private static void extractModel(File archive, File output) throws IOException {
+        ModelArchive.extract(archive,output,MODEL_ENTRY,MAX_MODEL_BYTES);
     }
-    private static int readBlock(InputStream in,byte[] block)throws IOException {
-        int offset=0;
-        while(offset<block.length){
-            int n=in.read(block,offset,block.length-offset);
-            if(n<0)return offset;
-            offset+=n;
-        }
-        return offset;
-    }
-    private static String tarName(byte[] hdr){
-        int len=0;while(len<100&&hdr[len]!=0)len++;
-        return new String(hdr,0,len,StandardCharsets.US_ASCII);
-    }
-    private static long tarSize(byte[] hdr)throws IOException{
-        String size=new String(hdr,124,12,StandardCharsets.US_ASCII).replace("\u0000","").trim();
-        try{return Long.parseLong(size,8);}catch(Exception e){
-            throw new IOException("Dimensione voce tar non valida");
-        }
-    }
-    private static void copyExactly(InputStream in,OutputStream out,long length)throws IOException {
-        byte[] buf=new byte[16384];long left=length;
-        while(left>0){
-            int n=in.read(buf,0,(int)Math.min(buf.length,left));
-            if(n<0)throw new IOException("Archivio troncato");
-            out.write(buf,0,n);left-=n;
-        }
-    }
-    private static void skipExactly(InputStream in,long length)throws IOException{
-        byte[] buf=new byte[16384];long left=length;
-        while(left>0){
-            int n=in.read(buf,0,(int)Math.min(buf.length,left));
-            if(n<0)throw new IOException("Archivio troncato");
-            left-=n;
-        }
-    }
+
     private static boolean verifyHash(File file,String expected)throws Exception{
         MessageDigest dig=MessageDigest.getInstance("SHA-256");
         try(InputStream in=new BufferedInputStream(new FileInputStream(file))){
