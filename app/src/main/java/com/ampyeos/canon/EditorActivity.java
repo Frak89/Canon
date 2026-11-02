@@ -143,7 +143,7 @@ public final class EditorActivity extends Activity {
         String incoming=getIntent().getStringExtra("image_uri");
         if(incoming!=null)load(Uri.parse(incoming));
         else if(getIntent().getData()!=null)load(getIntent().getData());
-        else pick(false);
+        else pick(getIntent().getBooleanExtra("pick_multiple",false));
     }
     private SeekBar slider(LinearLayout root,String text,int value){
         LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);
@@ -222,6 +222,7 @@ public final class EditorActivity extends Activity {
                 try{
                     Bitmap b=decode(u);PhotoReview review=PhotoReview.inspect(b);
                     candidates.add(new Candidate(u,review.score10,review.metrics.score,review.verdict,review.why));
+                    b.recycle();
                 }catch(Exception ignored){}
             }
             Collections.sort(candidates,(a,b)->Integer.compare(b.quality,a.quality));
