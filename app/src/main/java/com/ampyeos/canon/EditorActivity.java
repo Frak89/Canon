@@ -148,6 +148,8 @@ public final class EditorActivity extends Activity {
         root.addView(scroller,new LinearLayout.LayoutParams(-1,dp(370)));
         LinearLayout panel=new LinearLayout(this);panel.setOrientation(LinearLayout.VERTICAL);
         scroller.addView(panel);
+        TextView legend=txt("MENTA CHIARO = TOGGLE ON · SCURO = OFF/NON DISPONIBILE · BLU = AZIONE",11);
+        legend.setTextColor(0xffb8d5e3);panel.addView(legend);
         caption=txt("Apri una foto oppure confronta più scatti.",13);caption.setTextColor(CYAN);panel.addView(caption);
         report=txt("L'originale non viene mai sovrascritto.",12);panel.addView(report);
         LinearLayout tools=row(panel);
@@ -421,7 +423,7 @@ public final class EditorActivity extends Activity {
     private void toggleBefore(){
         if(original==null)return;
         if(compareOn){compareOn=false;comparison.setVisibility(View.GONE);}
-        if(showVisual)visualOverlay.setVisibility(View.GONE);
+        if(showVisual){showVisual=false;visualOverlay.setVisibility(View.GONE);}
         before=!before;image.setImageBitmap(before?original:display);
         updateButtonAvailability();
         crop.setVisibility(before?View.GONE:View.VISIBLE);
@@ -581,8 +583,8 @@ public final class EditorActivity extends Activity {
         if(original==null||display==null){caption.setText("Apri prima una foto.");return;}
         compareOn=!compareOn;
         comparison.setVisibility(compareOn?View.VISIBLE:View.GONE);
+        if(compareOn){showVisual=false;visualOverlay.setVisibility(View.GONE);}
         updateButtonAvailability();
-        visualOverlay.setVisibility(View.GONE);
         if(compareOn){
             comparison.setImages(original,display);
             lesson.setVisibility(View.GONE);
@@ -619,7 +621,8 @@ public final class EditorActivity extends Activity {
                 autoLesson=false;
                 updateButtonAvailability();
                 if(original!=null&&display!=null){
-                    compareOn=true;comparison.setImages(original,display);
+                    compareOn=true;showVisual=false;comparison.setImages(original,display);
+                    updateButtonAvailability();
                     comparison.setVisibility(View.VISIBLE);
                     lesson.setVisibility(View.GONE);
                     visualOverlay.setVisibility(View.GONE);
