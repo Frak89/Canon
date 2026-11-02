@@ -313,6 +313,7 @@ public final class EditorActivity extends Activity {
         worker.execute(()->{
             try{
                 Bitmap edited=ColorLooks.render(base,look,b,c,s);
+                VisualInspector.Report visual=showVisual ? VisualInspector.analyze(edited) : null;
                 ui.post(()->{
                     if(closing||generation.get()!=generationNow)return;
                     display=edited;
@@ -320,9 +321,7 @@ public final class EditorActivity extends Activity {
                     if(compareOn && original!=null)comparison.setImages(original,edited);
                     crop.setBitmapSize((before?original:edited).getWidth(),(before?original:edited).getHeight());
                     lesson.configure(edited.getWidth(),edited.getHeight(),PhotoReview.autoCrop(edited));
-                    if(inspection!=null)
-                        visualOverlay.configure(VisualInspector.analyze(edited),
-                            edited.getWidth(),edited.getHeight());
+                    if(visual!=null)visualOverlay.configure(visual,edited.getWidth(),edited.getHeight());
                 });
             }catch(Exception e){ui.post(()->caption.setText("Preview: "+e.getMessage()));}
         });
