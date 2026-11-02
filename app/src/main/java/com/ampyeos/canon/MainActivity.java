@@ -80,6 +80,7 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
     private TextView state, metrics, advice, aiText, score, modeLabel;
     private Button shutter;
     private Button recordButton;
+    private Button composerToggle,lookToggle,voiceToggle;
     private ProcessCameraProvider cameraProvider;
     private CanonCcapi canon;
     private String currentMode="PIXEL";
@@ -105,9 +106,16 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
     }
     private int dp(int d){return (int)(d*getResources().getDisplayMetrics().density+.5f);}
     private Button button(String label,LinearLayout row,View.OnClickListener run) {
-        Button b=new Button(this);b.setText(label);b.setTextSize(11);b.setAllCaps(false);
-        b.setTextColor(Color.WHITE);b.setOnClickListener(run);
-        row.addView(b,new LinearLayout.LayoutParams(dp(128),dp(52)));return b;
+        Button b=AmpyButtons.action(this,label);
+        b.setTextSize(11);b.setOnClickListener(run);
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(145),dp(52));
+        lp.setMargins(dp(3),dp(2),dp(3),dp(2));row.addView(b,lp);return b;
+    }
+    private Button toggleButton(String label,boolean checked,LinearLayout row,View.OnClickListener run) {
+        Button b=AmpyButtons.toggle(this,label,checked);
+        b.setTextSize(11);b.setOnClickListener(run);
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(159),dp(52));
+        lp.setMargins(dp(3),dp(2),dp(3),dp(2));row.addView(b,lp);return b;
     }
     private void createUi() {
         LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);
@@ -181,9 +189,9 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
         recordButton.setEnabled(false);
         button("EDIT / AULA",actions,v->openEditor());
         button("CLASSIFICA FOTO",actions,v->rankPhotos());
-        button("AUTO COMPOSER",actions,v->toggleComposer());
-        button("AUTO LOOK",actions,v->toggleAutoLook());
-        button("VOCE MAESTRO",actions,v->toggleVoice());
+        composerToggle=toggleButton("AUTO COMPOSER",autoCompose,actions,v->toggleComposer());
+        lookToggle=toggleButton("AUTO LOOK",autoLook,actions,v->toggleAutoLook());
+        voiceToggle=toggleButton("VOCE MAESTRO",voice,actions,v->toggleVoice());
         button("DIAGNOSTICA",actions,v->showDiagnostics());
         controls.addView(actions);panel.addView(controls);
         diagnostics=text("CANON: non collegata",11,0xffabc7d4);
@@ -374,11 +382,13 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
     private void toggleComposer(){
         autoCompose=!autoCompose;
         composer.setActive(autoCompose);
+        AmpyButtons.setToggle(composerToggle,autoCompose);
         getPreferences(MODE_PRIVATE).edit().putBoolean("auto_compose",autoCompose).apply();
         log("Automated Composer "+(autoCompose?"ATTIVO: guida visiva animata":"DISATTIVATO"));
     }
     private void toggleAutoLook(){
         autoLook=!autoLook;
+        AmpyButtons.setToggle(lookToggle,autoLook);
         getPreferences(MODE_PRIVATE).edit().putBoolean("auto_look",autoLook).apply();
         if(!autoLook) {
             liveLook=ColorLooks.Look.NATURALE;
@@ -389,6 +399,7 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
     }
     private void toggleVoice(){
         voice=!voice;
+        AmpyButtons.setToggle(voiceToggle,voice);
         getPreferences(MODE_PRIVATE).edit().putBoolean("voice",voice).apply();
         if(!voice&&speech!=null)speech.stop();
         log("Maestro vocale "+(voice?"attivo":"disattivo"));
