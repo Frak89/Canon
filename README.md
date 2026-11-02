@@ -1,4 +1,4 @@
-# AmpyEOS 0.2.0 — Photo Intelligence & Virtual Classroom
+# AmpyEOS 0.3.0 — Autonomous Master Classroom
 
 App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
 
@@ -22,6 +22,15 @@ App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
 - Scorciatoia per aprire AmpyLink se installata.
 - **Nessuna modifica firmware, no overclock, nessuna esecuzione Lua sulla fotocamera, nessun pairing BLE automatico ancora.**
 
+### Master AI Auto Render (Rev0.3)
+- **MASTER AI AUTO** produce 9 proposte locali a partire dalla foto: originale, esposizione bilanciata, composizione guidata, bianco e nero, bianco e nero ad alto contrasto, cinema, vintage, ritratto morbido e colori intensi.
+- Il selettore valuta luce, ombre, clipping, dettaglio, contrasto, e penalizza tagli eccessivi/look aggressivi. Il migliore viene renderizzato in automatico, senza modificare il file originale.
+- **VERSIONI AI** consente di selezionare qualsiasi rendering alternativo, senza inviare dati a un server.
+- **SPLIT SCORREVOLE**: confronto originale/proposta con linea trascinabile sullo schermo.
+- **LEZIONE AUTOMATICA**: cinque passaggi animati con voce TTS italiana, narrazione dello scatto originale, correzione, motivazione delle scelte, confronto e verdetto finale.
+- **VERDETTO MOTIVATO** e suggerimenti per rifare lo scatto, con indicazione del punteggio tecnico stimato; un 10/10 non equivale a una fotografia artisticamente perfetta.
+- L'ottimizzatore `AutoMasterEngine` è un motore euristico locale di rendering e confronto, **non** un modello generativo o una rete neurale estetica. Il riconoscimento volti/oggetti in Live View usa ML Kit.
+
 ### Color Lab + Virtual Classroom
 - Importa foto da Android, analizza e classifica fino a 15 scatti per qualità **tecnica stimata**.
 - Spiega criticità e suggerimenti pratici per migliorare l'immagine.
@@ -38,3 +47,6 @@ GitHub Actions > Android debug APK > artifact `AmpyEOS-debug-apk`.
 Oppure `gradle :app:assembleDebug` usando JDK 17 e SDK Android 36.
 
 **Test hardware**: codice compilato in CI quando il workflow è verde; il test sul Pixel fisico e su EOS R6 Mark II non è sostituibile da CI.
+
+## Stato della v0.3
+La build viene eseguita da GitHub Actions. Compilazione non significa test hardware: CameraX, SDK Canon CCAPI e TTS devono essere provati sul Pixel 7 Pro e sulla EOS R6 II. Un ritaglio automatico non può recuperare dettagli persi, né modificare la composizione reale dello scatto già effettuato.
