@@ -1,6 +1,18 @@
-# AmpyEOS 0.4.0 — Technical Photography Master Classroom
+# AmpyEOS 0.4.1 — Technical Photography Master Classroom
 
 App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
+
+## Novità v0.4.1 · Il maestro spiega il soggetto + pulsanti semantici
+
+- **SOGGETTO RILEVATO:** ML Kit descrive il riconoscimento realmente disponibile sulle foto (es. volto o categoria generica di oggetto), posizione alto/basso/sinistra/destra e area relativa. Se il modello non riconosce nulla, lo dice esplicitamente; non inventa il contenuto della scena.
+- **SPIEGAZIONE VOCALE:** nella lezione iniziale e nell'analisi visiva il maestro racconta quale regione è stata rilevata, la sua posizione e come il posizionamento potrebbe influire sulla composizione. Su Pixel Live i suggerimenti di ML Kit diventano più precisi.
+- **PULSANTI TOGGLE ATTIVI:** fondo **menta chiaro** con testo scuro e dicitura `ON`.
+- **TOGGLE SPENTI:** fondo **ardesia scuro**, contorno visibile e dicitura `OFF`; restano cliccabili per attivarli.
+- **AZIONI NORMALI (non-toggle):** fondo **blu vivo**, distinto dai toggle. I comandi senza una foto o senza funzione disponibile sono realmente disabilitati e diventano ancora più scuri, con testo attenuato.
+- **Editor:** i comandi che richiedono una fotografia restano disabilitati finché non apri/scatti; `APPLICA CROP` si attiva soltanto durante la selezione del ritaglio, `VERSIONI AI` soltanto quando esistono le proposte renderizzate.
+- **Accessibilità:** gli stati ON/OFF sono indicati anche nel testo e nella descrizione accessibile, non soltanto dal colore.
+
+Il riconoscimento ML Kit è limitato a volti e a un piccolo insieme di categorie generiche di oggetti, non a una comprensione generale di qualsiasi scena. Le parti che parlano di estetica sono consigli, non fatti accertati.
 
 ## Implementato
 
