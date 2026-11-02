@@ -1,31 +1,55 @@
 name: Android debug APK
+
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["app/**", "*.gradle.kts", "settings.gradle.kts", "gradle.properties", ".github/workflows/android.yml"]
+    paths:
+      - "app/**"
+      - "*.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+      - ".github/workflows/android.yml"
   pull_request:
-    paths: ["app/**", "*.gradle.kts", "settings.gradle.kts", "gradle.properties"]
+    paths:
+      - "app/**"
+      - "*.gradle.kts"
+      - "settings.gradle.kts"
+      - "gradle.properties"
+
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - name: Install SDK 36
-        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
-      - uses: gradle/actions/setup-gradle@v4
+          java-version: "17"
+      # GitHub ubuntu-latest already supplies the Android SDK and modern sdkmanager.
+      # Do not use android-actions/setup-android@v3: it runs "sdkmanager tools"
+      # which fails because the deprecated SDK "tools" package no longer exists.
+      - name: Check Android SDK
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          command -v sdkmanager
+          sdkmanager --version
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platforms;android-36" "build-tools;35.0.0"
+      - name: Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.11.1'
-      - name: Build debug
-        run: gradle --no-daemon :app:assembleDebug
-      - uses: actions/upload-artifact@v4
+          gradle-version: "8.11.1"
+      - name: Build APK
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
         with:
           name: AmpyEOS-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
