@@ -1,6 +1,9 @@
 package com.ampyeos.canon;
 
 import android.content.Context;
+import android.net.Uri;
+import android.database.Cursor;
+import android.provider.OpenableColumns;
 import android.graphics.Bitmap;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -51,9 +54,11 @@ public final class ExtraRecognition {
         "9f3bc29e38e90842a852bfed957dbf5e36f2d97a91dd17736b1e5c0aca8d3303";
     private static final String LABELS_SHA256 =
         "536feacc519de3d418de26b2effb4d75694a8c4c0063e36499a46fa8061e2da9";
-    private static final long MAX_ARCHIVE_BYTES=24L*1024*1024;
-    private static final long MAX_MODEL_BYTES=22L*1024*1024;
-    private static final long MAX_LABELS_BYTES=250_000;
+    // The old 24 MiB cap rejected the official archive on real devices.
+    // Retain generous anti-abuse bounds for disk writes and archive extraction.
+    private static final long MAX_ARCHIVE_BYTES=512L*1024*1024;
+    private static final long MAX_MODEL_BYTES=256L*1024*1024;
+    private static final long MAX_LABELS_BYTES=2L*1024*1024;
     private static final long RETRY_DELAY_MS=30L*60*1000;
     private static final int INPUT_SIZE=224;
     private final Context app;
@@ -187,6 +192,106 @@ public final class ExtraRecognition {
             }finally{busy.set(false);}
         });
     }
+
+    /**
+     * ACTION_OPEN_DOCUMENT supplies this Uri with temporary read permission.
+     * Import only the official pinned TFLite model/tgz and ImageNet label text.
+     * Files may reside in Downloads or another folder selected by the user.
+     */
+    public void importFromDevice(Uri selected,Callback callback){
+        if(closed||selected==null)return;
+        if(!busy.compareAndSet(false,true)){
+            notifyStatus(callback,"Importazione non avviata: è già attiva un'operazione AI.");
+            return;
+        }
+        worker.execute(()->{
+            File incoming=new File(directory,"selected.partial");
+            File extracted=new File(directory,"imported-model.partial");
+            try{
+                if(!directory.exists()&&!directory.mkdirs())
+                    throw new IOException("Impossibile creare la cartella privata dei modelli");
+                String name=displayName(selected).toLowerCase(Locale.ROOT);
+                if(!name.endsWith(".tgz")&&!name.endsWith(".tar.gz")&&
+                   !name.endsWith(".tflite")&&!name.endsWith(".txt"))
+                    throw new IOException("Formato non supportato. Seleziona .tgz, .tflite o ImageNetLabels.txt");
+                long max=name.endsWith(".txt")?MAX_LABELS_BYTES:
+                    name.endsWith(".tflite")?MAX_MODEL_BYTES:MAX_ARCHIVE_BYTES;
+                notifyStatus(callback,"Lettura file dalla cartella Download: "+name);
+                try(InputStream in=app.getContentResolver().openInputStream(selected);
+                    OutputStream out=new BufferedOutputStream(new FileOutputStream(incoming))){
+                    if(in==null)throw new IOException("Il selettore Android non consente di leggere il file");
+                    copyWithBound(in,out,max);
+                }
+                if(name.endsWith(".txt")){
+                    if(!verifyHash(incoming,LABELS_SHA256))
+                        throw new IOException("Le etichette non corrispondono al file ufficiale ImageNetLabels.txt");
+                    replaceFile(incoming,labels);
+                    ready=false;
+                    notifyStatus(callback,"Etichette ImageNet verificate e importate dalla cartella Download.");
+                }else{
+                    if(name.endsWith(".tgz")||name.endsWith(".tar.gz"))
+                        extractModel(incoming,extracted);
+                    else {
+                        if(!incoming.renameTo(extracted))
+                            throw new IOException("Impossibile preparare il modello selezionato");
+                    }
+                    if(!verifyHash(extracted,MODEL_SHA256))
+                        throw new IOException("SHA-256 diverso dal modello ufficiale. "+
+                            "Seleziona il file MobileNetV2 previsto, non un modello incompatibile.");
+                    replaceFile(extracted,model);
+                    ready=false;
+                    notifyStatus(callback,"Modello TFLite verificato e installato da Download.");
+                    if(!labels.isFile()||!verifyHash(labels,LABELS_SHA256)){
+                        notifyStatus(callback,"Scarico le etichette ufficiali (file piccolo). "+
+                            "In assenza di rete puoi importare ImageNetLabels.txt da Download.");
+                        File labelStage=new File(directory,"labels-import.partial");
+                        try {
+                            download(LABELS_URL,labelStage,MAX_LABELS_BYTES,callback,"etichette");
+                            if(!verifyHash(labelStage,LABELS_SHA256))
+                                throw new IOException("Hash etichette non valido");
+                            replaceFile(labelStage,labels);
+                            notifyStatus(callback,"Modello ed etichette verificati. Riconoscimento AI pronto offline.");
+                        }finally{labelStage.delete();}
+                    }else{
+                        notifyStatus(callback,"Modello ed etichette verificati. Riconoscimento AI pronto offline.");
+                    }
+                }
+            }catch(Exception e){
+                notifyStatus(callback,"Importazione AI: "+e.getMessage());
+            }finally{
+                incoming.delete();extracted.delete();
+                busy.set(false);
+            }
+        });
+    }
+    private String displayName(Uri uri){
+        try(Cursor cursor=app.getContentResolver().query(uri,
+            new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){
+            if(cursor!=null&&cursor.moveToFirst()){
+                String name=cursor.getString(0);
+                if(name!=null&&!name.isEmpty())return name;
+            }
+        }catch(Exception ignored){}
+        String path=uri.getLastPathSegment();
+        return path==null?"modello.tgz":path;
+    }
+    private static void replaceFile(File source,File destination)throws IOException{
+        if(destination.exists()&&!destination.delete())
+            throw new IOException("Impossibile sostituire il modello precedente");
+        if(!source.renameTo(destination))
+            throw new IOException("Impossibile installare il file verificato");
+    }
+    private static void copyWithBound(InputStream in,OutputStream out,long limit)throws IOException{
+        byte[] buf=new byte[32*1024];long bytes=0;int n;
+        while((n=in.read(buf))!=-1){
+            bytes+=n;
+            if(bytes>limit)throw new IOException("Il file supera il limite anti-abuso di "+
+                (limit/1024/1024)+" MiB");
+            out.write(buf,0,n);
+        }
+        if(bytes==0)throw new IOException("Il file selezionato è vuoto");
+    }
+
     public void close(){closed=true;worker.shutdownNow();}
 
     private void notifyStatus(Callback cb,String msg){
@@ -238,7 +343,7 @@ public final class ExtraRecognition {
             int status=con.getResponseCode();
             if(status!=200)throw new IOException("Download "+what+": HTTP "+status);
             long expected=con.getContentLengthLong();
-            if(expected>limit)throw new IOException("Pacchetto supera il limite previsto");
+            if(expected>limit)throw new IOException("Dimensione dichiarata "+(expected/1024/1024)+" MiB: supera il limite di sicurezza "+(limit/1024/1024)+" MiB");
             try(InputStream in=new BufferedInputStream(con.getInputStream());
                 OutputStream out=new BufferedOutputStream(new FileOutputStream(target))){
                 long count=0,next=2L*1024*1024;
@@ -246,7 +351,7 @@ public final class ExtraRecognition {
                 while((n=in.read(buf))!=-1){
                     if(closed)throw new IOException("Download interrotto");
                     count+=n;
-                    if(count>limit)throw new IOException("Pacchetto più grande del previsto");
+                    if(count>limit)throw new IOException("Download oltre il limite di sicurezza "+(limit/1024/1024)+" MiB");
                     out.write(buf,0,n);
                     if(count>=next){
                         notifyStatus(cb,"Download "+what+": "+(count/1024/1024)+" MB");
