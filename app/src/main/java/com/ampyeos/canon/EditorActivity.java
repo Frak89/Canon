@@ -57,6 +57,11 @@ public final class EditorActivity extends Activity {
     private CropView crop;
     private LessonOverlay lesson;
     private BeforeAfterView comparison;
+    private VisualInspectorOverlay visualOverlay;
+    private VisualInspector.Report inspection;
+    private SubjectAi stillSubject;
+    private String subjectDescription="Analisi soggetto non avviata";
+    private boolean showVisual=false;
     private AutoMasterEngine.Session masterSession;
     private AutoMasterEngine.Plan activePlan;
     private boolean compareOn=false,autoLesson=false;
@@ -102,6 +107,9 @@ public final class EditorActivity extends Activity {
         area.addView(crop,new FrameLayout.LayoutParams(-1,-1));
         lesson=new LessonOverlay(this);
         area.addView(lesson,new FrameLayout.LayoutParams(-1,-1));
+        visualOverlay=new VisualInspectorOverlay(this);
+        visualOverlay.setVisibility(View.GONE);
+        area.addView(visualOverlay,new FrameLayout.LayoutParams(-1,-1));
         comparison=new BeforeAfterView(this);
         comparison.setVisibility(View.GONE);
         area.addView(comparison,new FrameLayout.LayoutParams(-1,-1));
@@ -115,8 +123,14 @@ public final class EditorActivity extends Activity {
         button("APRI FOTO",tools,v->pick(false));
         button("SCEGLI MIGLIORE",tools,v->pick(true));
         button("MASTER AI AUTO",tools,v->autoMaster());
+        button("AUTO PRO COMPLETO",tools,v->autoPro());
         button("VERSIONI AI",tools,v->showVersions());
         button("AUTO COMPONI",tools,v->autoCompose());
+        button("AUTO RADDRIZZA",tools,v->autoStraighten());
+        button("AUTO TONI",tools,v->autoTone());
+        button("AUTO RESIZE",tools,v->chooseResize());
+        button("ANALISI VISIVA",tools,v->showAnalysis());
+        button("OVERLAY TECNICO",tools,v->toggleTechnicalOverlay());
         button("RITAGLIA",tools,v->chooseRatio());
         button("APPLICA CROP",tools,v->applyCrop());
         button("RUOTA 90°",tools,v->rotate());
@@ -157,6 +171,7 @@ public final class EditorActivity extends Activity {
         button("LEZIONE AUTOMATICA",classroom,v->beginAutoLesson());
         stepInfo=txt(steps[0],12);panel.addView(stepInfo);
         voice=getPreferences(MODE_PRIVATE).getBoolean("teacher_voice",true);
+        stillSubject=new SubjectAi();
         speech=new TextToSpeech(this,code->{if(code==TextToSpeech.SUCCESS && speech!=null){
             speech.setLanguage(Locale.ITALIAN);speech.setSpeechRate(.92f);
         }});
@@ -218,11 +233,24 @@ public final class EditorActivity extends Activity {
             try{
                 Bitmap b=decode(uri);
                 PhotoReview r=PhotoReview.inspect(b);
+                VisualInspector.Report visual=VisualInspector.analyze(b);
                 ui.post(()->{
                     if(closing)return;
                     stopAutoLesson();comparison.setVisibility(View.GONE);compareOn=false;
                     masterSession=null;activePlan=null;
-                    original=b;working=b;originalReview=r;
+                    original=b;working=b;originalReview=r;inspection=visual;
+                    subjectDescription="Ricerca di volti e oggetti sul Pixel…";
+                    visualOverlay.setSubject(null,"");
+                    visualOverlay.configure(visual,b.getWidth(),b.getHeight());
+                    visualOverlay.setVisibility(View.GONE);showVisual=false;
+                    if(stillSubject!=null)stillSubject.observe(b,observation->ui.post(()->{
+                        if(closing||original!=b)return;
+                        subjectDescription=observation.description;
+                        visualOverlay.setSubject(observation.normalizedBox,observation.description);
+                        report.setText("CHE COSA VEDO · "+subjectDescription+
+                            "\nDATI TECNICI · "+visual.summary+
+                            "\nPERCHÉ · "+r.why+"\nCOME · "+r.how);
+                    }));
                     selectedLook=r.look.look;
                     looks.setSelection(selectedLook.ordinal());
                     brightness.setProgress(100);contrast.setProgress(100);saturation.setProgress(100);
@@ -230,7 +258,8 @@ public final class EditorActivity extends Activity {
                     crop.setCropEnabled(false);crop.setAspect(0);
                     lesson.configure(b.getWidth(),b.getHeight(),r.suggestedCrop);
                     caption.setText("VALUTAZIONE INIZIALE: "+r.score10+"/10 · "+r.verdict);
-                    report.setText("PERCHÉ: "+r.why+"\nCOME: "+r.how);
+                    report.setText("DATI VISIVI: "+visual.summary+
+                        "\nPERCHÉ: "+r.why+"\nCOME: "+r.how);
                     refresh();showStep(0);
                 });
             }catch(Exception e){ui.post(()->caption.setText("Caricamento fallito: "+e.getMessage()));}
@@ -291,6 +320,9 @@ public final class EditorActivity extends Activity {
                     if(compareOn && original!=null)comparison.setImages(original,edited);
                     crop.setBitmapSize((before?original:edited).getWidth(),(before?original:edited).getHeight());
                     lesson.configure(edited.getWidth(),edited.getHeight(),PhotoReview.autoCrop(edited));
+                    if(inspection!=null)
+                        visualOverlay.configure(VisualInspector.analyze(edited),
+                            edited.getWidth(),edited.getHeight());
                 });
             }catch(Exception e){ui.post(()->caption.setText("Preview: "+e.getMessage()));}
         });
@@ -337,6 +369,7 @@ public final class EditorActivity extends Activity {
     private void toggleBefore(){
         if(original==null)return;
         if(compareOn){compareOn=false;comparison.setVisibility(View.GONE);}
+        if(showVisual)visualOverlay.setVisibility(View.GONE);
         before=!before;image.setImageBitmap(before?original:display);
         crop.setVisibility(before?View.GONE:View.VISIBLE);
         lesson.setVisibility(before?View.GONE:View.VISIBLE);
@@ -345,6 +378,7 @@ public final class EditorActivity extends Activity {
     private void restore(){
         if(original==null)return;
         stopAutoLesson();compareOn=false;comparison.setVisibility(View.GONE);
+        showVisual=false;visualOverlay.setVisibility(View.GONE);
         masterSession=null;activePlan=null;
         working=original;before=false;
         selectedLook=ColorLooks.Look.NATURALE;looks.setSelection(0);
@@ -355,7 +389,9 @@ public final class EditorActivity extends Activity {
     private void explain(){
         if(original==null||display==null)return;
         PhotoReview proposal=PhotoReview.inspect(display);
-        String info=(masterSession!=null?
+        String info=(inspection!=null?
+            inspection.fullReport()+"\n\nSOGGETTI (RICONOSCIMENTO ML KIT): "+subjectDescription+"\n\n":"")+
+            (masterSession!=null?
              masterSession.verdict+"\n\n"+masterSession.nextShot+"\n\n":
              "")+PhotoReview.compare(originalReview,proposal)
             +"\n\nPERCHÉ L'ORIGINALE PUÒ ESSERE MIGLIORATO:\n"+originalReview.why
@@ -370,6 +406,7 @@ public final class EditorActivity extends Activity {
         stepInfo.setText(steps[lessonStep]);
         if(working==null){teacher.setText("Apri una fotografia per iniziare.");return;}
         lesson.setVisibility(View.VISIBLE);crop.setCropEnabled(false);
+        visualOverlay.setVisibility(showVisual&&lessonStep<=2?View.VISIBLE:View.GONE);
         PhotoReview r=originalReview;
         if(r==null)return;
         lesson.configure(working.getWidth(),working.getHeight(),PhotoReview.autoCrop(working));
@@ -379,10 +416,12 @@ public final class EditorActivity extends Activity {
         switch(lessonStep){
             case 0:
                 message="Osserva l'immagine originale. La prima valutazione è "+r.score10+
-                    " su dieci. "+r.verdict+". "+r.why;
+                    " su dieci. "+r.verdict+". Ho rilevato: "+subjectDescription+
+                    ". "+(inspection==null?"":inspection.summary)+". "+r.why;
                 break;
             case 1:
-                message="Osserva le alte luci e le ombre. "+r.how+
+                message="Osserva le alte luci e le ombre. "+
+                    (inspection==null?"":inspection.explanation)+". "+r.how+
                     " Ricorda: le correzioni JPEG non recuperano dettagli mai registrati.";
                 break;
             case 2:
@@ -486,6 +525,7 @@ public final class EditorActivity extends Activity {
         if(original==null||display==null){caption.setText("Apri prima una foto.");return;}
         compareOn=!compareOn;
         comparison.setVisibility(compareOn?View.VISIBLE:View.GONE);
+        visualOverlay.setVisibility(View.GONE);
         if(compareOn){
             comparison.setImages(original,display);
             lesson.setVisibility(View.GONE);
@@ -505,6 +545,7 @@ public final class EditorActivity extends Activity {
         if(original==null){caption.setText("Carica una fotografia per la lezione.");return;}
         stopAutoLesson();
         compareOn=false;comparison.setVisibility(View.GONE);
+        showVisual=true;
         playing=true;voice=true;
         getPreferences(MODE_PRIVATE).edit().putBoolean("teacher_voice",true).apply();
         autoLesson=true;
@@ -521,6 +562,7 @@ public final class EditorActivity extends Activity {
                     compareOn=true;comparison.setImages(original,display);
                     comparison.setVisibility(View.VISIBLE);
                     lesson.setVisibility(View.GONE);
+                    visualOverlay.setVisibility(View.GONE);
                 }
                 return;
             }
@@ -528,6 +570,150 @@ public final class EditorActivity extends Activity {
             scheduleNext();
         };
         ui.postDelayed(lessonAdvance,11500);
+    }
+
+
+    private void showAnalysis(){
+        if(inspection==null){caption.setText("Carica una foto per vedere l'analisi.");return;}
+        String message=inspection.fullReport()+"\n\nSOGGETTO RILEVATO CON ML KIT\n"+
+            subjectDescription+"\n\nPERCHÉ L'ORIGINALE PUÒ ESSERE MIGLIORATO\n"+
+            (originalReview==null?"":originalReview.why);
+        new AlertDialog.Builder(this).setTitle("Analisi tecnica e compositiva")
+            .setMessage(message)
+            .setPositiveButton("MOSTRA A VIDEO",(dialog,n)->{
+                showVisual=true;
+                visualOverlay.setVisibility(View.VISIBLE);
+                lesson.setVisibility(View.GONE);
+                comparison.setVisibility(View.GONE);compareOn=false;
+                caption.setText("ARANCIO: dettaglio · TURCHESE: terzi · GIALLO: crop · VIOLA: possibile linea · VERDE: soggetto ML Kit");
+                voice=true;
+                say("Ora ti mostro la mappa dei dettagli. "+inspection.summary+". "+
+                    inspection.improvements+" Ho rilevato: "+subjectDescription);
+            })
+            .setNegativeButton("CHIUDI",null).show();
+    }
+    private void toggleTechnicalOverlay(){
+        if(inspection==null){caption.setText("Apri una fotografia.");return;}
+        showVisual=!showVisual;
+        visualOverlay.setVisibility(showVisual?View.VISIBLE:View.GONE);
+        if(showVisual){
+            compareOn=false;comparison.setVisibility(View.GONE);
+            lesson.setVisibility(View.GONE);
+            caption.setText("OVERLAY VISIVO · heatmap dei contorni, terzi, crop, soggetto e linee candidate");
+        }else lesson.setVisibility(View.VISIBLE);
+    }
+    private void autoStraighten(){
+        if(working==null){caption.setText("Apri una fotografia.");return;}
+        Bitmap src=working;
+        caption.setText("Analizzo le linee orizzontali: ruoto solo se affidabili…");
+        worker.execute(()->{
+            try{
+                VisualInspector.Report candidate=VisualInspector.analyze(src);
+                Bitmap output=AutoOptimizer.straighten(src,
+                    candidate.lineAngleDegrees,candidate.lineConfidence);
+                ui.post(()->{
+                    if(closing||working!=src)return;
+                    if(output==src){
+                        caption.setText("Nessuna correzione affidabile: evita di inclinare inutilmente lo scatto.");
+                        return;
+                    }
+                    working=output;crop.setBitmapSize(output.getWidth(),output.getHeight());
+                    caption.setText(String.format(Locale.ITALIAN,
+                        "AUTO RADDRIZZA: corretti %.1f° (linea candidata, non necessariamente orizzonte)",
+                        candidate.lineAngleDegrees));
+                    report.setText("La rotazione corregge una linea dominante "+
+                        "e implica un piccolo ritaglio. Verifica che non sia una diagonale intenzionale.");
+                    refresh();
+                });
+            }catch(Exception e){ui.post(()->caption.setText("Raddrizzamento: "+e.getMessage()));}
+        });
+    }
+    private void autoTone(){
+        if(working==null){caption.setText("Apri una fotografia.");return;}
+        Bitmap src=working;
+        caption.setText("AUTO TONI · correzione locale prudente…");
+        worker.execute(()->{
+            try{
+                Bitmap corrected=AutoOptimizer.tone(src,PhotoAnalyzer.fromBitmap(src));
+                ui.post(()->{
+                    if(closing||working!=src)return;
+                    working=corrected;
+                    report.setText("AUTO TONI: schiarimento selettivo delle ombre e "+
+                        "compressione delle zone luminose, nei limiti del JPEG. "+
+                        "Non recupera dettagli mancanti dal file.");
+                    caption.setText("Correzione tonale applicata alla copia di lavoro.");
+                    refresh();
+                });
+            }catch(Exception e){ui.post(()->caption.setText("Auto Toni: "+e.getMessage()));}
+        });
+    }
+    private void chooseResize(){
+        if(working==null){caption.setText("Apri una fotografia.");return;}
+        AutoOptimizer.ExportPreset[] presets=AutoOptimizer.ExportPreset.values();
+        new AlertDialog.Builder(this).setTitle("AutoResize · formato di destinazione")
+            .setItems(AutoOptimizer.ExportPreset.labels(),(dialog,index)->{
+                AutoOptimizer.ExportPreset preset=presets[index];
+                if(preset==AutoOptimizer.ExportPreset.ORIGINAL){
+                    caption.setText("Formato originale: nessun resize.");
+                    return;
+                }
+                new AlertDialog.Builder(this).setTitle("Come adattare il formato?")
+                    .setItems(new String[]{"RIEMPI: crop guidato dall'area di dettagli",
+                            "ADATTA: mantieni tutta la foto, aggiungi bande"},
+                        (d,mode)->resizeNow(preset,mode==0)).show();
+            }).show();
+    }
+    private void resizeNow(AutoOptimizer.ExportPreset preset,boolean fill){
+        Bitmap source=working;
+        if(source==null)return;
+        caption.setText("AutoResize "+preset.label+"…");
+        worker.execute(()->{
+            try{
+                VisualInspector.Report visual=VisualInspector.analyze(source);
+                Bitmap result=AutoOptimizer.resize(source,preset,fill,visual.focusX,visual.focusY);
+                ui.post(()->{
+                    if(closing||working!=source)return;
+                    working=result;crop.setBitmapSize(result.getWidth(),result.getHeight());
+                    crop.setCropEnabled(false);
+                    caption.setText("Dimensioni esportazione: "+result.getWidth()+"×"+result.getHeight());
+                    report.setText(AutoOptimizer.describeResize(source,preset,fill));
+                    refresh();
+                });
+            }catch(Exception e){ui.post(()->caption.setText("AutoResize fallito: "+e.getMessage()));}
+        });
+    }
+    private void autoPro(){
+        if(original==null){caption.setText("Carica una fotografia.");return;}
+        stopAutoLesson();
+        Bitmap source=original;
+        caption.setText("AUTO PRO: varianti, raddrizzamento e correzione tonale…");
+        worker.execute(()->{
+            try{
+                VisualInspector.Report visual=VisualInspector.analyze(source);
+                AutoMasterEngine.Session session=AutoMasterEngine.analyze(source);
+                Bitmap candidate=AutoMasterEngine.render(source,session.best.plan);
+                Bitmap straight=AutoOptimizer.straighten(candidate,
+                    visual.lineAngleDegrees,visual.lineConfidence);
+                Bitmap result=AutoOptimizer.tone(straight,PhotoAnalyzer.fromBitmap(straight));
+                ui.post(()->{
+                    if(closing||original!=source)return;
+                    masterSession=session;activePlan=session.best.plan;
+                    working=result;before=false;compareOn=false;
+                    comparison.setVisibility(View.GONE);
+                    selectedLook=ColorLooks.Look.NATURALE;looks.setSelection(0);
+                    brightness.setProgress(100);contrast.setProgress(100);saturation.setProgress(100);
+                    crop.setCropEnabled(false);crop.setBitmapSize(result.getWidth(),result.getHeight());
+                    report.setText("AUTO PRO COMPLETO\n"+
+                        session.verdict+"\n\nRADDRIZZAMENTO: "+
+                        (straight==candidate?"nessuna linea affidabile":"applicato con ritaglio protettivo")+
+                        "\nTONI: regolazione moderata di luci e ombre.\n"+
+                        "NESSUN dettaglio RAW ricreato o generato.");
+                    caption.setText("AUTO PRO · "+session.best.plan.name+" · "+
+                        session.best.vote+"/10 (stima tecnica)");
+                    refresh();beginAutoLesson();
+                });
+            }catch(Exception e){ui.post(()->caption.setText("Auto Pro: "+e.getMessage()));}
+        });
     }
 
     private void save(){
@@ -552,6 +738,7 @@ public final class EditorActivity extends Activity {
     @Override protected void onDestroy(){
         closing=true;stopAutoLesson();
         if(speech!=null){speech.stop();speech.shutdown();}
+        if(stillSubject!=null)stillSubject.close();
         worker.shutdownNow();
         super.onDestroy();
     }
