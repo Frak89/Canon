@@ -47,7 +47,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * fully visual 5-step lessons and export of a new JPEG copy to MediaStore.
  */
 public final class EditorActivity extends Activity {
-    private static final int PICK=1, PICK_GROUP=2, CYAN=0xff43eadb, BG=0xff080f1a;
+    private static final int PICK=1, PICK_GROUP=2, PICK_MODEL=3, CYAN=0xff43eadb, BG=0xff080f1a;
     private final Handler ui=new Handler(Looper.getMainLooper());
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final AtomicInteger generation=new AtomicInteger();
@@ -132,6 +132,13 @@ public final class EditorActivity extends Activity {
         getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(BG);setContentView(root);
+        // Android 15/16 edge-to-edge: honor the real status/navigation bar insets.
+        root.setOnApplyWindowInsetsListener((v,insets)->{
+            android.graphics.Insets safe=insets.getInsets(android.view.WindowInsets.Type.systemBars());
+            v.setPadding(0,safe.top,0,safe.bottom);
+            return insets;
+        });
+        root.requestApplyInsets();
         TextView title=txt("AMPY▲EOS  /  COLOR LAB + CLASSROOM",18);title.setTextColor(CYAN);
         root.addView(title);
         FrameLayout area=new FrameLayout(this);area.setBackgroundColor(Color.BLACK);
@@ -141,6 +148,7 @@ public final class EditorActivity extends Activity {
         crop=new CropView(this);crop.setCropEnabled(false);
         area.addView(crop,new FrameLayout.LayoutParams(-1,-1));
         lesson=new LessonOverlay(this);
+        lesson.setVisibility(View.GONE);
         area.addView(lesson,new FrameLayout.LayoutParams(-1,-1));
         visualOverlay=new VisualInspectorOverlay(this);
         visualOverlay.setVisibility(View.GONE);
@@ -179,6 +187,17 @@ public final class EditorActivity extends Activity {
                 "download su Wi-Fi e "+(extraRecognition.allowMobileAuto()?"4G/5G":"dati mobili spenti")),
             12);
         modelStatus.setTextColor(0xff8debd2);panel.addView(modelStatus);
+        LinearLayout localModelRow=row(panel);
+        button("IMPORTA MODELLO DA DOWNLOAD",localModelRow,v->pickModel());
+        button("INFO MODELLI",localModelRow,v->new AlertDialog.Builder(this)
+            .setTitle("Modelli AI compatibili")
+            .setMessage("AmpyEOS usa MobileNetV2 TensorFlow Lite. Puoi scegliere "+
+                "dalla cartella Download il file ufficiale .tgz o il .tflite estratto. "+
+                "Per funzionare offline sono necessarie anche le etichette "+
+                "ImageNetLabels.txt. I file vengono verificati con SHA-256. "+
+                "Qwen .gguf non è compatibile con questo motore: "+
+                "servirà un runtime Vision-Language separato.")
+            .setPositiveButton("OK",null).show());
         caption=txt("Apri una foto oppure confronta più scatti.",13);caption.setTextColor(CYAN);panel.addView(caption);
         report=txt("L'originale non viene mai sovrascritto.",12);panel.addView(report);
         LinearLayout tools=row(panel);
@@ -278,6 +297,10 @@ public final class EditorActivity extends Activity {
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
         if(result!=RESULT_OK||data==null)return;
+        if(request==PICK_MODEL&&data.getData()!=null){
+            importModel(data.getData());
+            return;
+        }
         if(request==PICK && data.getData()!=null)load(data.getData());
         else if(request==PICK_GROUP){
             ArrayList<Uri> selected=new ArrayList<>();
@@ -287,6 +310,25 @@ public final class EditorActivity extends Activity {
             }else if(data.getData()!=null)selected.add(data.getData());
             if(!selected.isEmpty())rank(selected);
         }
+    }
+    private void pickModel(){
+        Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra("android.content.extra.SHOW_ADVANCED",true);
+        startActivityForResult(intent,PICK_MODEL);
+    }
+    private void importModel(Uri selected){
+        modelStatus.setText("IMPORTAZIONE: lettura del file selezionato…");
+        extraRecognition.importFromDevice(selected,new ExtraRecognition.Callback(){
+            @Override public void status(String info){
+                if(closing)return;
+                modelStatus.setText("IMPORTAZIONE · "+info);
+            }
+            @Override public void result(ExtraRecognition.Recognition result){
+                if(!closing)modelStatus.setText(result.describe());
+            }
+        });
     }
     private Bitmap decode(Uri uri)throws Exception{
         BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;
@@ -316,6 +358,10 @@ public final class EditorActivity extends Activity {
                     stopAutoLesson();comparison.setVisibility(View.GONE);compareOn=false;
                     masterSession=null;activePlan=null;
                     original=b;working=b;originalReview=r;inspection=visual;
+                    image.setImageBitmap(b); // Show the actual decoded source immediately.
+                    if(r.metrics.brightness<14 && r.metrics.detail<8)
+                        modelStatus.setText("AVVISO IMMAGINE: i pixel del file risultano quasi neri. "+
+                            "Verifica che il JPEG/PNG selezionato mostri davvero una fotografia.");
                     subjectDescription="Ricerca di volti e oggetti sul Pixel…";
                     subjectExplanation="Il modello sta analizzando questa fotografia.";
                     extraRequests++;
