@@ -102,21 +102,53 @@ public final class ExtraRecognition {
         app.getSharedPreferences("extra_ai",Context.MODE_PRIVATE)
             .edit().putBoolean("auto_download",on).apply();
     }
+    /** User-requested cellular support is enabled by default, independently of auto download. */
+    public boolean allowMobileAuto(){
+        return app.getSharedPreferences("extra_ai",Context.MODE_PRIVATE)
+            .getBoolean("allow_mobile_auto",true);
+    }
+    public void setAllowMobileAuto(boolean allowed){
+        app.getSharedPreferences("extra_ai",Context.MODE_PRIVATE)
+            .edit().putBoolean("allow_mobile_auto",allowed).apply();
+    }
     public static String modelName(){return "MobileNetV2 ImageNet · ~1000 classi";}
-    public boolean wifiConnected(){
+    private NetworkCapabilities activeCapabilities(){
         ConnectivityManager cm=(ConnectivityManager)app.getSystemService(Context.CONNECTIVITY_SERVICE);
-        if(cm==null)return false;
+        if(cm==null)return null;
         Network network=cm.getActiveNetwork();
-        if(network==null)return false;
-        NetworkCapabilities nc=cm.getNetworkCapabilities(network);
+        if(network==null)return null;
+        return cm.getNetworkCapabilities(network);
+    }
+    public boolean wifiConnected(){
+        NetworkCapabilities nc=activeCapabilities();
         return nc!=null&&nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             &&(nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)||
-               nc.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET));
+                nc.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET));
+    }
+    public boolean mobileConnected(){
+        NetworkCapabilities nc=activeCapabilities();
+        return nc!=null&&nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            &&nc.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR);
     }
     /**
-     * auto=true: Wi-Fi required for the first download; cached recognition works offline.
-     * auto=false: explicit user press permits metered mobile connectivity.
-     * Only one job is accepted at a time to prevent repeated large downloads.
+     * Automatic download: Wi-Fi/Ethernet or cellular if permitted by the user's
+     * switch. Roaming cellular is excluded from automatic downloads to avoid
+     * surprise charges; manual user-triggered download still works.
+     */
+    public boolean autoNetworkAllowed(){
+        NetworkCapabilities nc=activeCapabilities();
+        if(nc==null||!nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET))
+            return false;
+        if(nc.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)||
+           nc.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))return true;
+        return allowMobileAuto()&&nc.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+            &&nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING);
+    }
+    /**
+     * auto=true: Wi-Fi/Ethernet or user-enabled non-roaming mobile data.
+     * auto=false: manual action can use mobile data, including roaming.
+     * Cached recognition works without any internet connection.
+     * Only one job is accepted at a time to prevent repeated downloads.
      */
     public void classify(Bitmap image,boolean auto,Callback callback){
         if(closed||image==null)return;
@@ -126,9 +158,12 @@ public final class ExtraRecognition {
             try{
                 if(!ready) {
                     if(!verifyExisting()){
-                        if(auto&&!wifiConnected()){
+                        if(auto&&!autoNetworkAllowed()){
                             notifyStatus(callback,"Modello aggiuntivo non installato. "+
-                                "Collega il Wi-Fi per il download automatico oppure premi RICONOSCIMENTO EXTRA.");
+                                (mobileConnected()&&!allowMobileAuto()?
+                                    "Abilita DATI MOBILI AI per scaricarlo automaticamente su 4G/5G. ":
+                                    "Connettiti al Wi-Fi o a una rete mobile non in roaming. ")+
+                                "Puoi sempre usare RICONOSCIMENTO EXTRA per il download manuale.");
                             return;
                         }
                         if(auto&&System.currentTimeMillis()<retryAfter){
@@ -137,7 +172,8 @@ public final class ExtraRecognition {
                             return;
                         }
                         notifyStatus(callback,"ML Kit non ha riconosciuto il soggetto: "+
-                            "scarico il modello ufficiale MobileNetV2, solo dati AI (nessuna foto inviata).");
+                            "scarico MobileNetV2 via "+(wifiConnected()?"Wi-Fi":"rete mobile 4G/5G")+
+                            ". Verranno trasferiti solo file del modello, non fotografie.");
                         ensureInstalled(callback);
                     }
                     ready=true;
