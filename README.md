@@ -1,6 +1,15 @@
-# AmpyEOS 0.5.2 — AI Model Download Repair and Offline Import
+# AmpyEOS 0.5.3 — Verified Streaming Model Extraction
 
 App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
+
+## Novità v0.5.3 · Correzione dell'estrazione TAR del modello AI
+
+- Corretto l'errore reale `Modello AI non disponibile: Voce archivio fuori limiti` sul Pixel. La versione precedente imponeva un limite di 256 MiB anche a file di checkpoint e altri elementi **non necessari** dell'archivio, oltre a interrompere la scansione dopo soli 80 MiB estratti.
+- Il nuovo `ModelArchive` scorre in streaming un archivio TAR.GZ, ignora gli altri file senza scriverli su disco e salva soltanto il file ufficiale `mobilenet_v2_1.0_224.tflite`; limite di estrazione complessivo 4 GiB come protezione, limite di 256 MiB applicato soltanto al modello TFLite estratto.
+- La verifica del modello avviene comunque con SHA-256 pinning; file arbitrari Qwen GGUF non vengono interpretati come TFLite.
+- La CI ora usa lo **stesso codice di estrazione Java di Android** sull'archivio TensorFlow reale, confronta byte per byte il TFLite con `tar` e conferma gli hash attesi. Non è sufficiente che l'app compili se la decompressione fallisce.
+- Status separati per download del pacchetto, estrazione e controllo di integrità. L'importazione manuale dalla cartella Download usa lo stesso estrattore corretto.
+- Anche su 4G/5G vale la regola `DATI MOBILI AI` impostata dall'utente. Rimangono validi cache offline e nessun invio di immagini.
 
 ## Novità v0.5.2 · Riparazione download + file dalla cartella Download
 
