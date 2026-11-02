@@ -107,7 +107,7 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
     private Button button(String label,LinearLayout row,View.OnClickListener run) {
         Button b=new Button(this);b.setText(label);b.setTextSize(11);b.setAllCaps(false);
         b.setTextColor(Color.WHITE);b.setOnClickListener(run);
-        row.addView(b,new LinearLayout.LayoutParams(0,dp(52),1));return b;
+        row.addView(b,new LinearLayout.LayoutParams(dp(128),dp(52)));return b;
     }
     private void createUi() {
         LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);
