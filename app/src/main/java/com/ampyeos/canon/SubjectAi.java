@@ -17,6 +17,7 @@ import com.google.mlkit.vision.face.FaceDetection;
 import com.google.mlkit.vision.face.FaceDetector;
 import com.google.mlkit.vision.face.FaceDetectorOptions;
 import java.util.List;
+import java.util.Locale;
 
 /** Real on-device ML Kit object + face recognition. Model artifacts bundled; no cloud calls. */
 public final class SubjectAi {
@@ -66,34 +67,85 @@ public final class SubjectAi {
                 List<DetectedObject> objList=ot.isSuccessful()?ot.getResult():null;
                 if(faceList!=null && !faceList.isEmpty()) {
                     Rect r=faceList.get(0).getBoundingBox();
-                    message=composition("Ritratto ("+faceList.size()+" volti)",r,input.getWidth(),input.getHeight());
+                    String kind=faceList.size()==1?"un volto":faceList.size()+" volti (primo evidenziato)";
+                    message=describe(kind,r,input.getWidth(),input.getHeight()).shortText;
                 }else if(objList!=null && !objList.isEmpty()){
                     DetectedObject o=objList.get(0);
-                    String label=o.getLabels().isEmpty()?"Soggetto":o.getLabels().get(0).getText();
-                    message=composition(label,o.getBoundingBox(),input.getWidth(),input.getHeight());
-                }else message="AI: nessun soggetto distinto rilevato. Cerca un punto focale chiaro.";
+                    String label=o.getLabels().isEmpty()?
+                        "un oggetto, senza categoria affidabile":
+                        labelIt(o.getLabels().get(0).getText());
+                    message=describe(label,o.getBoundingBox(),
+                        input.getWidth(),input.getHeight()).shortText;
+                }else message="AI: nessun volto o oggetto generico riconosciuto; "+
+                    "non posso identificare con certezza il soggetto della scena.";
             }catch(Exception e){message="AI: elaborazione incompleta";}
             finally{finish.run();}
             callback.onResult(message);
         });
     }
 
-    private static String composition(String type,Rect box,int w,int h) {
-        double x=box.exactCenterX()/Math.max(1,w);
-        double y=box.exactCenterY()/Math.max(1,h);
-        double deltaX=Math.min(Math.abs(x-1.0/3),Math.abs(x-2.0/3));
-        double deltaY=Math.min(Math.abs(y-1.0/3),Math.abs(y-2.0/3));
-        if(deltaX<0.10 && deltaY<0.10) return "AI · "+type+": soggetto vicino all'incrocio dei terzi.";
-        if(x>0.42&&x<0.58&&y>0.36&&y<0.64)
-            return "AI · "+type+": centrato. Prova un'inquadratura decentrata oppure valorizza la simmetria.";
-        return "AI · "+type+": prova a posizionarlo su uno dei punti della griglia dei terzi.";
+
+    private static String labelIt(String english) {
+        if(english==null||english.isEmpty())
+            return "un oggetto, senza categoria affidabile";
+        switch(english.toLowerCase(Locale.ROOT)) {
+            case "food": return "un oggetto della categoria cibo";
+            case "plant": return "un oggetto della categoria pianta";
+            case "place": return "una scena o luogo (categoria generica)";
+            case "fashion good": return "un oggetto della categoria abbigliamento/accessori";
+            case "home good": return "un oggetto della categoria oggetti per la casa";
+            default: return "un oggetto, categoria "+english;
+        }
+    }
+    private static final class Description {
+        final String shortText, explanation;
+        Description(String shortText,String explanation){
+            this.shortText=shortText;this.explanation=explanation;
+        }
+    }
+    private static Description describe(String kind,Rect box,int width,int height) {
+        if(box==null)
+            return new Description("Soggetto non localizzato",
+                "Non riesco a individuare una regione attendibile da evidenziare.");
+        float w=Math.max(1,width),h=Math.max(1,height);
+        float x=Math.max(0,Math.min(1,box.exactCenterX()/w));
+        float y=Math.max(0,Math.min(1,box.exactCenterY()/h));
+        float area=Math.max(0,Math.min(1,box.width()/w*box.height()/h));
+        String horizontal=x<.38f?"nella parte sinistra":x>.62f?
+            "nella parte destra":"vicino al centro orizzontale";
+        String vertical=y<.35f?"in alto":y>.65f?"in basso":"a metà altezza";
+        double minDistance=10;
+        for(float tx:new float[]{1f/3,2f/3})for(float ty:new float[]{1f/3,2f/3})
+            minDistance=Math.min(minDistance,Math.hypot(x-tx,y-ty));
+        String compose=minDistance<.16?
+            "La regione rilevata si trova vicino a un'intersezione dei terzi. "+
+            "Questa disposizione può funzionare, ma non è una regola obbligatoria.":
+            "Il soggetto non è vicino alle intersezioni dei terzi. "+
+            (x>.4f&&x<.6f?"Una composizione centrale può valorizzare la simmetria.":
+                "Prova un'inquadratura alternativa, lasciando spazio nella direzione dello sguardo o del movimento.");
+        boolean edge=box.left<w*.04f||box.top<h*.04f||
+            box.right>w*.96f||box.bottom>h*.96f;
+        String border=edge?
+            "Una parte della regione è molto vicina al bordo: verifica che il taglio sia intenzionale. ":
+            "";
+        String percent=area<.10?"occupa una porzione relativamente piccola":
+            area>.45?"occupa una parte considerevole":"ha una dimensione intermedia";
+        String summary="AI · Rilevato "+kind+", "+horizontal+", "+vertical+".";
+        String details="Il rilevatore locale ha individuato "+kind+", "+horizontal+", "+vertical+
+            "; la regione "+percent+" dell'immagine. "+border+compose+
+            " La categoria rilevata è generica: non posso descrivere dettagli "+
+            "specifici, identità o significato della scena se il modello non li ha riconosciuti.";
+        return new Description(summary,details);
     }
 
     /** Report from actual on-device ML Kit inference, not edge saliency. */
     public static final class Observation {
         public final RectF normalizedBox;
         public final String description;
-        Observation(RectF b,String s){normalizedBox=b;description=s;}
+        public final String explanation;
+        Observation(RectF b,String description,String explanation){
+            normalizedBox=b;this.description=description;this.explanation=explanation;
+        }
     }
     public interface ObservationCallback {void onResult(Observation observation);}
     public void observe(Bitmap bitmap,ObservationCallback callback){
@@ -102,19 +154,19 @@ public final class SubjectAi {
             Task<List<DetectedObject>> objectsTask=stillObjects.process(input);
             Task<List<Face>> facesTask=faces.process(input);
             Tasks.whenAllComplete(objectsTask,facesTask).addOnCompleteListener(t->{
-                String name="Nessun volto o oggetto riconosciuto";
+                String name="Nessun volto o oggetto generico riconosciuto";
                 Rect found=null;
                 try{
                     List<Face> facesFound=facesTask.isSuccessful()?facesTask.getResult():null;
                     List<DetectedObject> objectsFound=objectsTask.isSuccessful()?objectsTask.getResult():null;
                     if(facesFound!=null&&!facesFound.isEmpty()){
                         found=facesFound.get(0).getBoundingBox();
-                        name=facesFound.size()==1?"Volto rilevato":facesFound.size()+" volti rilevati";
+                        name=facesFound.size()==1?"un volto":facesFound.size()+" volti (primo evidenziato)";
                     }else if(objectsFound!=null&&!objectsFound.isEmpty()){
                         DetectedObject o=objectsFound.get(0);
                         found=o.getBoundingBox();
-                        name=o.getLabels().isEmpty()?"Oggetto rilevato":
-                            "Oggetto: "+o.getLabels().get(0).getText();
+                        name=o.getLabels().isEmpty()?"un oggetto, categoria sconosciuta":
+                            labelIt(o.getLabels().get(0).getText());
                     }
                 }catch(Exception ignored){}
                 RectF normalized=null;
@@ -125,10 +177,19 @@ public final class SubjectAi {
                         Math.min(1,found.right/(float)bitmap.getWidth()),
                         Math.min(1,found.bottom/(float)bitmap.getHeight()));
                 }
-                callback.onResult(new Observation(normalized,name));
+                if(found!=null) {
+                    Description info=describe(name,found,bitmap.getWidth(),bitmap.getHeight());
+                    callback.onResult(new Observation(normalized,info.shortText,info.explanation));
+                }else {
+                    callback.onResult(new Observation(null,name,
+                        "Non ho rilevato con sufficiente certezza un volto o un oggetto "+
+                        "delle categorie supportate. Posso comunque misurare luce, "+
+                        "ombre, colore e contorni, ma non inventerò un soggetto."));
+                }
             });
         }catch(Exception e){callback.onResult(new Observation(null,
-            "Analisi semantica non disponibile: "+e.getMessage()));}
+            "Riconoscimento soggetti non disponibile",
+            "Errore del rilevatore locale: "+e.getMessage()));}
     }
     public void close(){objects.close();stillObjects.close();faces.close();}
 }
