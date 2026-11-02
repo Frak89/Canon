@@ -13,8 +13,9 @@ public final class PhotoAnalyzer {
         public final int brightness, highlights, shadows, contrast, detail;
         public final String advice;
         public final int[] histogram;
-        Result(int s,int b,int h,int sh,int c,int d,String a,int[] histogram) {
-            score=s; brightness=b; highlights=h; shadows=sh; contrast=c; detail=d; advice=a; this.histogram=histogram;
+        public final float focusX,focusY;
+        Result(int s,int b,int h,int sh,int c,int d,String a,int[] histogram,float focusX,float focusY) {
+            score=s; brightness=b; highlights=h; shadows=sh; contrast=c; detail=d; advice=a; this.histogram=histogram;this.focusX=focusX;this.focusY=focusY;
         }
         public String summary() {
             return "LUCE " + brightness + "/255  ·  ALTE LUCI " + highlights + "%  ·  OMBRE " + shadows
@@ -95,6 +96,6 @@ public final class PhotoAnalyzer {
             if(third>0.15) tips.add("Prova a spostare il soggetto verso un punto dei terzi");
             else tips.add("Buon equilibrio tecnico: cerca il momento e l'espressione migliori");
         }
-        return new Result(score,avg,highlights,shadows,contrast,detail,String.join("  •  ",tips),histogram);
+        return new Result(score,avg,highlights,shadows,contrast,detail,String.join("  •  ",tips),histogram,(float)cx,(float)cy);
     }
 }
