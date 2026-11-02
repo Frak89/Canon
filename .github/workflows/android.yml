@@ -36,10 +36,19 @@ jobs:
       - name: Check Android SDK
         run: |
           echo "ANDROID_HOME=${ANDROID_HOME}"
-          command -v sdkmanager
-          sdkmanager --version
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "platforms;android-36" "build-tools;35.0.0"
+          SDKMANAGER="$(find "${ANDROID_HOME}/cmdline-tools" -maxdepth 3 -type f -name sdkmanager -print -quit 2>/dev/null || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "No SDK manager on runner: installing Android command-line tools"
+            curl -fsSL -o /tmp/cmdline.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            mkdir -p "${ANDROID_HOME}/cmdline-tools/latest"
+            unzip -q /tmp/cmdline.zip -d /tmp/cmdline-extract
+            cp -a /tmp/cmdline-extract/cmdline-tools/. "${ANDROID_HOME}/cmdline-tools/latest/"
+            SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          echo "Using $SDKMANAGER"
+          "$SDKMANAGER" --version
+          yes | "$SDKMANAGER" --sdk_root="${ANDROID_HOME}" --licenses >/dev/null || true
+          "$SDKMANAGER" --sdk_root="${ANDROID_HOME}" --install "platforms;android-36" "build-tools;35.0.0"
       - name: Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
