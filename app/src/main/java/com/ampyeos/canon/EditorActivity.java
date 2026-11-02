@@ -61,7 +61,7 @@ public final class EditorActivity extends Activity {
     private VisualInspector.Report inspection;
     private SubjectAi stillSubject;
     private ExtraRecognition extraRecognition;
-    private Button extraAiToggle;
+    private Button extraAiToggle,mobileAiToggle;
     private TextView modelStatus;
     private int extraRequests=0;
     private String subjectDescription="Analisi soggetto non avviata";
@@ -161,11 +161,23 @@ public final class EditorActivity extends Activity {
                 extraRecognition.setAutoEnabled(!extraRecognition.autoEnabled());
                 AmpyButtons.setToggle(extraAiToggle,extraRecognition.autoEnabled());
                 modelStatus.setText(extraRecognition.autoEnabled()?
-                    "AI EXTRA: download automatico Wi-Fi attivo se ML Kit non riconosce il soggetto":
+                    "AI EXTRA: download automatico attivo su Wi-Fi "+
+                        (extraRecognition.allowMobileAuto()?"e rete mobile 4G/5G":"(dati mobili disattivati)"):
                     "AI EXTRA: download automatico disattivato; avvio manuale disponibile");
             });
+        mobileAiToggle=toggleButton("DATI MOBILI AI",extraRecognition.allowMobileAuto(),
+            modelActions,v->{
+                extraRecognition.setAllowMobileAuto(!extraRecognition.allowMobileAuto());
+                AmpyButtons.setToggle(mobileAiToggle,extraRecognition.allowMobileAuto());
+                modelStatus.setText(extraRecognition.allowMobileAuto()?
+                    "4G/5G consentito per il download automatico AI (escluso roaming). "+
+                    "Il consumo del traffico dipende dal piano dati.":
+                    "Download automatico AI limitato al Wi-Fi. Il download manuale resta possibile.");
+            });
         modelStatus=txt("AI EXTRA · "+ExtraRecognition.modelName()+
-            " · "+(extraRecognition.isCached()?"modello in cache":"download solo se necessario"),12);
+            " · "+(extraRecognition.isCached()?"modello in cache":
+                "download su Wi-Fi e "+(extraRecognition.allowMobileAuto()?"4G/5G":"dati mobili spenti")),
+            12);
         modelStatus.setTextColor(0xff8debd2);panel.addView(modelStatus);
         caption=txt("Apri una foto oppure confronta più scatti.",13);caption.setTextColor(CYAN);panel.addView(caption);
         report=txt("L'originale non viene mai sovrascritto.",12);panel.addView(report);
