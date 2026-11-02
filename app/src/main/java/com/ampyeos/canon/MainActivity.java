@@ -36,9 +36,12 @@ public final class MainActivity extends ComponentActivity {
     private final ExecutorService networkExecutor=Executors.newSingleThreadExecutor();
     private final Handler ui=new Handler(Looper.getMainLooper());
     private final AtomicBoolean canonLoop=new AtomicBoolean(false);
+    private final AtomicBoolean aiBusy=new AtomicBoolean(false);
+    private SubjectAi subjectAi;
+    private int frameCount=0;
     private PreviewView pixelView;
     private ImageView canonView;
-    private TextView state, metrics, advice, score, modeLabel;
+    private TextView state, metrics, advice, aiText, score, modeLabel;
     private Button shutter;
     private ProcessCameraProvider cameraProvider;
     private CanonCcapi canon;
@@ -50,6 +53,7 @@ public final class MainActivity extends ComponentActivity {
         super.onCreate(b);
         getWindow().setStatusBarColor(BG);getWindow().setNavigationBarColor(BG);
         createUi();
+        subjectAi=new SubjectAi();
         startPixel();
     }
     private TextView text(String value,int size,int color) {
@@ -86,8 +90,9 @@ public final class MainActivity extends ComponentActivity {
         score.setGravity(Gravity.CENTER_VERTICAL);
         metrics=text("Attendi i fotogrammi",12,0xffc7d4df);
         advice=text("Analizzo luce, dettaglio e inquadratura in locale.",14,Color.WHITE);
+        aiText=text("AI locale · ricerca volti e oggetti…",13,0xff88e4d2);
         state=text("PIXEL · nessuna immagine inviata a servizi esterni",11,0xff9badbd);
-        layout.addView(score);layout.addView(metrics);layout.addView(advice);
+        layout.addView(score);layout.addView(metrics);layout.addView(advice);layout.addView(aiText);
         shutter=new Button(this);shutter.setText("SCATTA CANON");shutter.setEnabled(false);
         shutter.setOnClickListener(v->sendShutter());
         layout.addView(shutter,new LinearLayout.LayoutParams(-1,dp(50)));
@@ -129,11 +134,19 @@ public final class MainActivity extends ComponentActivity {
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build();
                 analyzer.setAnalyzer(analysisExecutor,frame->{
-                    try{
+                    boolean handedOff=false;
+                    try {
                         PhotoAnalyzer.Result r=PhotoAnalyzer.fromCamera(frame);
                         ui.post(()->{if(!closing && "PIXEL".equals(currentMode))update(r);});
+                        if(subjectAi!=null && (++frameCount%5==0) && aiBusy.compareAndSet(false,true)) {
+                            handedOff=true;
+                            subjectAi.analyze(frame,message->{
+                                aiBusy.set(false);
+                                ui.post(()->{if(!closing && "PIXEL".equals(currentMode))aiText.setText(message);});
+                            });
+                        }
                     }catch(Exception e){log("Analisi frame: "+e.getMessage());}
-                    finally{frame.close();}
+                    finally{if(!handedOff)frame.close();}
                 });
                 cameraProvider.bindToLifecycle(this,CameraSelector.DEFAULT_BACK_CAMERA,preview,analyzer);
             }catch(Exception e){log("CameraX: "+e.getMessage());}
@@ -180,6 +193,12 @@ public final class MainActivity extends ComponentActivity {
                     try{
                         Bitmap frame=client.frame();misses=0;
                         PhotoAnalyzer.Result m=PhotoAnalyzer.fromBitmap(frame);
+                        if(subjectAi!=null && (++frameCount%5==0) && aiBusy.compareAndSet(false,true)) {
+                            subjectAi.analyze(frame,message->{
+                                aiBusy.set(false);
+                                ui.post(()->{if(!closing && "CANON".equals(currentMode))aiText.setText(message);});
+                            });
+                        }
                         ui.post(()->{
                             if(!closing&&"CANON".equals(currentMode)){canonView.setImageBitmap(frame);update(m);}
                             else frame.recycle();
@@ -227,6 +246,7 @@ public final class MainActivity extends ComponentActivity {
         if(cameraProvider!=null)cameraProvider.unbindAll();
         if(canon!=null){networkExecutor.execute(()->canon.stop());}
         analysisExecutor.shutdownNow();networkExecutor.shutdown();
+        if(subjectAi!=null && !aiBusy.get())subjectAi.close();
         super.onDestroy();
     }
 }
