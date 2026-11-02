@@ -23,6 +23,16 @@ if [ -z "$NAME" ]; then
   exit 1
 fi
 tar -xOzf "$TEMP/model.tgz" "$NAME" > "$TEMP/model.tflite"
+# Compile the production Android archive parser as pure Java and run it
+# against the real official package. This prevents false-positive APK builds
+# that compile but fail when extracting the model on a Pixel.
+mkdir -p "$TEMP/classes"
+javac -d "$TEMP/classes" \
+  app/src/main/java/com/ampyeos/canon/ModelArchive.java \
+  scripts/CheckModelArchive.java
+java -cp "$TEMP/classes" CheckModelArchive "$TEMP/model.tgz" "$TEMP/model-java.tflite"
+cmp "$TEMP/model.tflite" "$TEMP/model-java.tflite"
+echo "Android ModelArchive: extracted bytes identical to GNU tar."
 ARCHIVE_BYTES="$(stat -c '%s' "$TEMP/model.tgz")"
 MODEL_BYTES="$(stat -c '%s' "$TEMP/model.tflite")"
 LABEL_BYTES="$(stat -c '%s' "$TEMP/labels.txt")"
