@@ -12,8 +12,9 @@ public final class PhotoAnalyzer {
         public final int score;
         public final int brightness, highlights, shadows, contrast, detail;
         public final String advice;
-        Result(int s,int b,int h,int sh,int c,int d,String a) {
-            score=s; brightness=b; highlights=h; shadows=sh; contrast=c; detail=d; advice=a;
+        public final int[] histogram;
+        Result(int s,int b,int h,int sh,int c,int d,String a,int[] histogram) {
+            score=s; brightness=b; highlights=h; shadows=sh; contrast=c; detail=d; advice=a; this.histogram=histogram;
         }
         public String summary() {
             return "LUCE " + brightness + "/255  ·  ALTE LUCI " + highlights + "%  ·  OMBRE " + shadows
@@ -54,9 +55,11 @@ public final class PhotoAnalyzer {
     // Uses downsampled luminance (not raw sensor data). Thresholds are qualitative.
     static Result calculate(int[] g,int w,int h) {
         long sum=0, sq=0; int low=0,hi=0;
+        int[] histogram=new int[32];
         double edgeSum=0, weightedX=0, weightedY=0, weights=0;
         for(int y=0;y<h;y++) for(int x=0;x<w;x++) {
             int i=y*w+x,v=g[i]; sum+=v; sq+=(long)v*v;
+            histogram[Math.max(0,Math.min(31,v/8))]++;
             if(v<24) low++; if(v>240) hi++;
             if(x>0 && y>0) {
                 int mag=Math.abs(v-g[i-1])+Math.abs(v-g[i-w]);
@@ -92,6 +95,6 @@ public final class PhotoAnalyzer {
             if(third>0.15) tips.add("Prova a spostare il soggetto verso un punto dei terzi");
             else tips.add("Buon equilibrio tecnico: cerca il momento e l'espressione migliori");
         }
-        return new Result(score,avg,highlights,shadows,contrast,detail,String.join("  •  ",tips));
+        return new Result(score,avg,highlights,shadows,contrast,detail,String.join("  •  ",tips),histogram);
     }
 }
