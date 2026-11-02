@@ -52,6 +52,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** AmpyEOS Rev0.1: on-device photo coach + experimental Canon CCAPI live view. */
 public final class MainActivity extends ComponentActivity implements SensorEventListener {
     private static final int CYAN=Color.rgb(75,240,228), BG=Color.rgb(9,15,25);
+    private static final int PICK_MODEL=411;
     private final ExecutorService analysisExecutor=Executors.newSingleThreadExecutor();
     private final ExecutorService networkExecutor=Executors.newSingleThreadExecutor();
     private final ExecutorService commandExecutor=Executors.newSingleThreadExecutor();
@@ -126,6 +127,12 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
     private void createUi() {
         LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);
         layout.setBackgroundColor(BG);setContentView(layout);
+        layout.setOnApplyWindowInsetsListener((v,insets)->{
+            android.graphics.Insets safe=insets.getInsets(android.view.WindowInsets.Type.systemBars());
+            v.setPadding(0,safe.top,0,safe.bottom);
+            return insets;
+        });
+        layout.requestApplyInsets();
         modeLabel=text("AMPY▲EOS · VIRTUAL PHOTOGRAPHY STUDIO",18,CYAN);
         modeLabel.setTypeface(android.graphics.Typeface.DEFAULT,android.graphics.Typeface.BOLD);
         layout.addView(modeLabel);
@@ -196,6 +203,7 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
         button("EDIT / AULA",actions,v->openEditor());
         button("CLASSIFICA FOTO",actions,v->rankPhotos());
         button("RICONOSCI EXTRA",actions,v->tryExtraLive(false,null));
+        button("MODELLO DA DOWNLOAD",actions,v->pickModel());
         extraToggle=toggleButton("DOWNLOAD EXTRA",
             extraRecognition.autoEnabled(),actions,v->{
                 extraRecognition.setAutoEnabled(!extraRecognition.autoEnabled());
@@ -408,6 +416,27 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
         });
     }
 
+
+    private void pickModel(){
+        Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        startActivityForResult(intent,PICK_MODEL);
+    }
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
+        super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode==PICK_MODEL&&resultCode==RESULT_OK&&data!=null&&data.getData()!=null){
+            extraStatus.setText("Importazione modello dalla cartella Download in corso…");
+            extraRecognition.importFromDevice(data.getData(),new ExtraRecognition.Callback(){
+                @Override public void status(String info){
+                    if(!closing)extraStatus.setText(info);
+                }
+                @Override public void result(ExtraRecognition.Recognition result){
+                    if(!closing)extraStatus.setText(result.describe());
+                }
+            });
+        }
+    }
 
     private void tryExtraLive(boolean automatic,Bitmap remoteFrame){
         if(extraRecognition==null||extraRecognition.isWorking())return;
