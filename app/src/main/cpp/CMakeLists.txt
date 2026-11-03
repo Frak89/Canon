@@ -25,6 +25,15 @@ set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
 set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "" FORCE)
 set(MTMD_VIDEO OFF CACHE BOOL "" FORCE)
 
+# Use Pixel 7 Pro Mali-G710 Vulkan compute for both the Qwen text decoder
+# and the multimodal projector. CPU remains compiled as fallback.
+set(GGML_VULKAN ON CACHE BOOL "Enable Android GPU acceleration" FORCE)
+set(GGML_VULKAN_CHECK_RESULTS OFF CACHE BOOL "" FORCE)
+set(GGML_VULKAN_SHADER_DEBUG_INFO OFF CACHE BOOL "" FORCE)
+# In cross-compilation, NDK Vulkan headers/libraries are target-side while
+# glslc/SPIR-V-Headers are installed on the Linux CI host.
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
+
 set(LLAMA_SRC "${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/llama.cpp")
 if(NOT EXISTS "${LLAMA_SRC}/CMakeLists.txt")
     message(FATAL_ERROR "Missing pinned llama.cpp. Execute bash scripts/fetch_llama_cpp.sh")
