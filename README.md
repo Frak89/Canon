@@ -1,6 +1,22 @@
-# AmpyEOS 0.8.1 — Studio Pro · Qwen persistente in Download
+# AmpyEOS 0.8.2 — Qwen Quick Vision con limiti di elaborazione CPU
 
 App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
+
+## Novità v0.8.2 · Correzione encoder visivo Qwen troppo lento
+
+Un test reale su Pixel 7 Pro ha mostrato **1.208 secondi senza alcun verdetto**, bloccato nella fase encoder vision di Qwen3-VL 2B. Questo non era un download ma un'elaborazione CPU troppo costosa.
+
+- **Modalità Qwen Rapido:** foto max **224 px**, budget fino a **90 s** e numero massimo di token visivi limitato.
+- **Qwen Profondo:** max **320 px**, budget fino a **180 s**; **Confronto:** max **384 px**, budget fino a **180 s**.
+- Il limite non è soltanto sul Bitmap: il C++ impone anche `image_max_tokens` all'encoder MTMD di llama.cpp, che altrimenti può eseguire preprocess e tokenizzazione a risoluzioni eccessive.
+- Callback di interruzione cooperative su **CPU llama.cpp** e sull'elaborazione **GGML/MTMD**. Il controllo timer UI invoca la richiesta di annullamento; con alcuni kernel CPU lunghi il timeout non è necessariamente immediato.
+- **Nessuna falsa percentuale di progresso:** tempo effettivo, limite del profilo, fasi native e token generati se l'encoder completa.
+- Se Qwen non riesce ad analizzare entro il budget, l'app non inventa valutazioni. Rimangono disponibili **MUSIQ**, strumenti di composizione e i controlli locali.
+- I file GGUF **non vengono riscaricati**: si riusano da `Download/AmpyEOS/Qwen3-VL`.
+
+**Guida e test sul Pixel:** [docs/AmpyEOS_Rev082_FastVision.md](docs/AmpyEOS_Rev082_FastVision.md)
+
+> La compilazione GitHub verifica Java e C++. La durata reale delle due modalità su Tensor G2 va misurata sul Pixel. Un'IA multimodale 2B senza accelerazione GPU può comunque essere inadatta all'analisi interattiva: il timeout serve a gestirne onestamente il limite, non a garantire risultati in 90 secondi.
 
 ## Novità v0.8.1 · Qwen scaricato una volta sola
 
