@@ -27,8 +27,9 @@ public final class VisionDiagnostics {
             (SystemClock.elapsedRealtime()-created)/1000f, sanitize(event)));
     }
     private static String sanitize(String text) {
-        return text.replaceAll("[\\r\\n\\t]"," ").replaceAll(
-            "[/\\\\][^\\s]+","[percorso omesso]").substring(0,Math.min(text.length(),180));
+        String safe=text.replaceAll("[\\r\\n\\t]"," ").replaceAll(
+            "[/\\\\][^\\s]+","[percorso omesso]");
+        return safe.substring(0,Math.min(safe.length(),180));
     }
     public String memory() {
         ActivityManager manager=(ActivityManager)context.getSystemService(Context.ACTIVITY_SERVICE);
