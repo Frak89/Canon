@@ -521,8 +521,16 @@ public final class EditorActivity extends Activity {
         gridAction("SALVA MODELLI IN DOWNLOAD",publicModels,v->saveQwenToDownloads());
         LinearLayout downloadPair=paired(modelsSection);
         gridAction("IMPORTA GGUF DA DOWNLOAD",downloadPair,v->pickQwen());
+        gridAction("FILE QWEN IN DOWNLOAD",paired(modelsSection),v->showQwenFiles());
         gridAction("SOSPENDI DOWNLOAD",downloadPair,v->{
-            if(qwenModels!=null)qwenModels.cancel();
+            if(QwenDownloadService.isActive(this)){
+                QwenDownloadService.cancelDownload(this);
+                visionStatus.setText("Richiesta sospensione inviata al servizio. "+
+                    "I file parziali rimangono in Download.");
+            }else if(qwenModels!=null){
+                qwenModels.cancel();
+                visionStatus.setText("Nessun download in background attivo.");
+            }
         });
         LinearLayout musiqPair=paired(modelsSection);
         gridAction("IMPORTA MUSIQ ONNX",musiqPair,v->pickMusiq());
@@ -1247,6 +1255,29 @@ public final class EditorActivity extends Activity {
 
     /** Copies verified model files from the previous private cache when possible.
      *  Never makes a network request or deletes the only valid copy. */
+    private void showQwenFiles(){
+        String fileList=qwenModels==null?"Gestore Qwen non disponibile":
+            qwenModels.filesReport();
+        android.content.SharedPreferences p=QwenDownloadService.status(this);
+        String state=QwenDownloadService.isActive(this)?
+            "DOWNLOAD IN BACKGROUND · ":"ULTIMO STATO · ";
+        String info=state+p.getString(QwenDownloadService.KEY_MESSAGE,
+            "Non è stato eseguito alcun download in background.")+"\n\n"+fileList;
+        new AlertDialog.Builder(this).setTitle("File Qwen effettivamente salvati")
+            .setMessage(info)
+            .setPositiveButton("APRl DOWNLOAD",(d,w)->{
+                try{
+                    startActivity(new Intent(
+                        android.app.DownloadManager.ACTION_VIEW_DOWNLOADS));
+                }catch(Exception e){
+                    caption.setText("Apri Files del Pixel → Download → "+
+                        "AmpyEOS → Qwen3-VL.");
+                }
+            })
+            .setNeutralButton("RICOLLEGA GGUF",(d,w)->pickQwen())
+            .setNegativeButton("CHIUDI",null).show();
+    }
+
     private void saveQwenToDownloads(){
         if(qwenModels==null)return;
         visionStatus.setText("QWEN · Controllo e salvataggio in "+
@@ -1265,36 +1296,49 @@ public final class EditorActivity extends Activity {
 
     private void downloadQwen(){
         if(qwenModels==null)return;
+        if(QwenDownloadService.isActive(this)){
+            visionStatus.setText("Il download Qwen è già attivo in background. "+
+                "Controlla la notifica persistente.");
+            return;
+        }
         if(qwenModels.isReady()){
-            visionStatus.setText("QWEN · Già presente in Download/AmpyEOS/Qwen3-VL. "+
-                "Nessun nuovo download necessario.");
+            visionStatus.setText(qwenModels.isPersistent()?
+                "Qwen è già salvato in Download/AmpyEOS/Qwen3-VL. "+
+                    "Non verrà riscaricato.":
+                "Qwen si trova nella vecchia cartella privata: "+
+                    "usa SALVA MODELLI IN DOWNLOAD senza riscaricarlo.");
             return;
         }
         new AlertDialog.Builder(this)
-            .setTitle("Qwen3-VL 2B · Solo i file mancanti")
-            .setMessage("AmpyEOS cerca prima i GGUF in Download/AmpyEOS/Qwen3-VL. "+
-                "Scaricherà soltanto i file assenti, salvandoli lì in modo persistente "+
-                "anche dopo la disinstallazione. Dimensione massima complessiva: "+
-                "circa 1,55 GB. Puoi utilizzare Wi-Fi o 4G/5G: su rete mobile "+
-                "consumerai traffico dati. Il download interrotto potrà riprendere. "+
-                "SHA-256 verificato prima dell'uso. Le foto non sono inviate in rete.")
+            .setTitle("Scarica solo i GGUF Qwen mancanti")
+            .setMessage("AmpyEOS usa un SERVIZIO ANDROID con notifica: "+
+                "il download continua anche se chiudi l'editor o spegni "+
+                "lo schermo, salvo restrizioni del sistema e della batteria. "+
+                "Salvataggio in Download/AmpyEOS/Qwen3-VL/ "+
+                "tramite MediaStore. Se esistono già file .part, il download "+
+                "riparte dai byte salvati. Traffico massimo circa 1,55 GB. "+
+                "Le foto non vengono inviate online. "+
+                "Se hai già i GGUF in Download ma non vengono trovati, "+
+                "premi prima IMPORTA GGUF DA DOWNLOAD.")
             .setNegativeButton("ANNULLA",null)
-            .setPositiveButton("SCARICA SUL PIXEL",(dialog,which)->{
-                qwenDownloadButton.setEnabled(false);
-                visionStatus.setText("Qwen3-VL · Download nella cartella Download/AmpyEOS/Qwen3-VL…");
-                qwenModels.download(new QwenModelManager.Listener(){
-                    @Override public void onProgress(String message,long current,long total){
-                        if(!closing)visionStatus.setText("QWEN3-VL · "+message);
+            .setPositiveButton("AVVIA IN BACKGROUND",(d,w)->{
+                try{
+                    QwenDownloadService.begin(this);
+                    visionStatus.setText("Download Qwen avviato con notifica Android. "+
+                        "Vai pure in altre applicazioni: i file sono in Download.");
+                    updateButtonAvailability();
+                    if(android.os.Build.VERSION.SDK_INT>=33&&
+                        checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                            !=android.content.pm.PackageManager.PERMISSION_GRANTED){
+                        requestPermissions(new String[]{
+                            android.Manifest.permission.POST_NOTIFICATIONS},4201);
                     }
-                    @Override public void onComplete(boolean success,String message){
-                        if(closing)return;
-                        visionStatus.setText("QWEN3-VL · "+message);
-                        updateButtonAvailability();
-                    }
-                });
+                }catch(Exception ex){
+                    visionStatus.setText("Impossibile avviare il servizio Qwen: "+
+                        ex.getMessage());
+                }
             }).show();
     }
-
 
     private void analyzeVision(){startQwen(false,false);}
 
