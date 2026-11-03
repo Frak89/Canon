@@ -1,22 +1,21 @@
-# AmpyEOS 0.8.2 — Qwen Quick Vision con limiti di elaborazione CPU
+# AmpyEOS 0.8.2 — Analisi rapida davvero locale e Qwen con timeout
 
 App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
 
-## Novità v0.8.2 · Correzione encoder visivo Qwen troppo lento
+## Novità v0.8.2 · Risposta rapida senza 20 minuti di attesa
 
-Un test reale su Pixel 7 Pro ha mostrato **1.208 secondi senza alcun verdetto**, bloccato nella fase encoder vision di Qwen3-VL 2B. Questo non era un download ma un'elaborazione CPU troppo costosa.
+Il test sul Pixel 7 Pro ha mostrato **1.208 secondi** bloccati nell'encoder Qwen3-VL CPU. Questa revisione separa **due percorsi tecnicamente distinti**, senza attribuire a un modello risultati prodotti da un altro:
 
-- **Modalità Qwen Rapido:** foto max **224 px**, budget fino a **90 s** e numero massimo di token visivi limitato.
-- **Qwen Profondo:** max **320 px**, budget fino a **180 s**; **Confronto:** max **384 px**, budget fino a **180 s**.
-- Il limite non è soltanto sul Bitmap: il C++ impone anche `image_max_tokens` all'encoder MTMD di llama.cpp, che altrimenti può eseguire preprocess e tokenizzazione a risoluzioni eccessive.
-- Callback di interruzione cooperative su **CPU llama.cpp** e sull'elaborazione **GGML/MTMD**. Il controllo timer UI invoca la richiesta di annullamento; con alcuni kernel CPU lunghi il timeout non è necessariamente immediato.
-- **Nessuna falsa percentuale di progresso:** tempo effettivo, limite del profilo, fasi native e token generati se l'encoder completa.
-- Se Qwen non riesce ad analizzare entro il budget, l'app non inventa valutazioni. Rimangono disponibili **MUSIQ**, strumenti di composizione e i controlli locali.
-- I file GGUF **non vengono riscaricati**: si riusano da `Download/AmpyEOS/Qwen3-VL`.
+- **ANALISI RAPIDA LOCALE:** non avvia il pesante Qwen-VL, non richiede GGUF e funziona anche offline. Usa **ML Kit** per eventuali soggetti realmente rilevati, **MUSIQ ONNX** se il punteggio neurale è già disponibile e misure visive su esposizione, contrasto, ombre, linee e composizione geometrica. Mostra sempre i limiti e **non inventa voti fotografici**. Ha una coda dedicata per non restare dietro all'encoder Qwen.
+- **QWEN PROFONDO · MAX 60 s:** opzionale per l'interpretazione semantica della foto. Invia la foto esclusivamente al motore JNI **sul Pixel**, senza server. L'app limita l'anteprima a 320px, restringe i token visivi nel processore MTMD e richiede l'interruzione della CPU al raggiungimento del budget. Il limite è **cooperativo**: un kernel nativo può ancora terminare in ritardo; il pulsante FERMA ANALISI resta disponibile.
+- **CONFRONTA ORIGINALE / EDIT** usa lo stesso limite CPU di 60 s; se non completa, non simula un confronto Qwen.
+- **Stato accurato:** cronometro reale, fasi C++ e token generati soltanto quando la generazione è iniziata.
+- I GGUF già salvati in `Download/AmpyEOS/Qwen3-VL` vengono riutilizzati; non c'è alcun motivo di scaricarli nuovamente.
+- MUSIQ è un punteggio di **qualità percettiva**, non un giudizio artistico. L'analisi rapida non interpreta autonomamente la semantica della scena se ML Kit non la riconosce.
 
-**Guida e test sul Pixel:** [docs/AmpyEOS_Rev082_FastVision.md](docs/AmpyEOS_Rev082_FastVision.md)
+**Guida ai limiti di prestazioni e prove sul Pixel:** [docs/AmpyEOS_Rev082_FastVision.md](docs/AmpyEOS_Rev082_FastVision.md).
 
-> La compilazione GitHub verifica Java e C++. La durata reale delle due modalità su Tensor G2 va misurata sul Pixel. Un'IA multimodale 2B senza accelerazione GPU può comunque essere inadatta all'analisi interattiva: il timeout serve a gestirne onestamente il limite, non a garantire risultati in 90 secondi.
+> Verificare con un APK sul Pixel tempi, risposta alla cancellazione e temperature: la sola compilazione CI non dimostra una durata di inferenza garantita.
 
 ## Novità v0.8.1 · Qwen scaricato una volta sola
 
