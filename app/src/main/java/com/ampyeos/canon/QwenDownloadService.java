@@ -10,6 +10,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
 import android.os.IBinder;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 
 /**
@@ -31,6 +33,7 @@ public final class QwenDownloadService extends Service {
     public static final String KEY_TOTAL="total";
     public static final String KEY_SUCCESS="success";
     public static final String KEY_FINISHED="finished";
+    public static final String KEY_UPDATED="updated_elapsed";
     private static final String CHANNEL="ampyeos_qwen_download";
     private static final int NOTIFICATION_ID=2071;
     private QwenModelManager manager;
@@ -38,6 +41,15 @@ public final class QwenDownloadService extends Service {
     private volatile boolean active=false;
     private long lastNotification=0;
     private long lastBytes=-1;
+    private final Handler heartbeatHandler=new Handler(Looper.getMainLooper());
+    private final Runnable heartbeat=new Runnable(){
+        @Override public void run(){
+            if(!active)return;
+            status(QwenDownloadService.this).edit()
+                .putLong(KEY_UPDATED,SystemClock.elapsedRealtime()).apply();
+            heartbeatHandler.postDelayed(this,5000);
+        }
+    };
 
     public static void begin(Context context) {
         Intent intent=new Intent(context,QwenDownloadService.class);
@@ -52,6 +64,12 @@ public final class QwenDownloadService extends Service {
     }
     public static SharedPreferences status(Context context){
         return context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
+    }
+    public static boolean isActive(Context context){
+        SharedPreferences p=status(context);
+        long stamp=p.getLong(KEY_UPDATED,0);
+        return p.getBoolean(KEY_ACTIVE,false)&&stamp>0 &&
+            SystemClock.elapsedRealtime()-stamp<20000;
     }
 
     @Override public void onCreate(){
@@ -75,6 +93,7 @@ public final class QwenDownloadService extends Service {
         }
         if(active)return START_NOT_STICKY;
         active=true;
+        heartbeatHandler.post(heartbeat);
         // startForeground immediately, before lengthy I/O or hashing.
         startForeground(NOTIFICATION_ID,
             buildNotification("Ricerca dei GGUF già presenti in Download",0,
@@ -146,7 +165,8 @@ public final class QwenDownloadService extends Service {
             .putLong(KEY_BYTES,bytes)
             .putLong(KEY_TOTAL,total)
             .putBoolean(KEY_SUCCESS,success)
-            .putBoolean(KEY_FINISHED,finished).apply();
+            .putBoolean(KEY_FINISHED,finished)
+            .putLong(KEY_UPDATED,SystemClock.elapsedRealtime()).apply();
     }
     /** Android 15+ enforces the dataSync foreground-service six-hour quota. */
     @Override public void onTimeout(int startId,int fgsType){
@@ -159,6 +179,12 @@ public final class QwenDownloadService extends Service {
         stopSelf();
     }
     @Override public void onDestroy(){
+        heartbeatHandler.removeCallbacks(heartbeat);
+        if(active){
+            writeStatus(false,"Download interrotto dal sistema. "+
+                "I file parziali in Download restano disponibili per la ripresa.",
+                lastBytes<0?0:lastBytes,QwenModelManager.TOTAL_BYTES,false,true);
+        }
         active=false;
         if(manager!=null)manager.close();
         super.onDestroy();
