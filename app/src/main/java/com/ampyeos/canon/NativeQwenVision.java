@@ -43,10 +43,17 @@ public final class NativeQwenVision {
     }
     public static String analyze(Bitmap image,QwenModelManager models,String prompt,
                                  ProgressListener progress) throws Exception {
+        return analyze(image,models,prompt,progress,640,880);
+    }
+    /** Adjustable fidelity: quick=448px/480 tokens, deep=640px/1100 tokens. */
+    public static String analyze(Bitmap image,QwenModelManager models,String prompt,
+                                 ProgressListener progress,int maxEdge,int tokens)
+            throws Exception {
+        if(maxEdge<320||maxEdge>1024||tokens<100||tokens>1200)
+            throw new IllegalArgumentException("Parametri di inferenza fuori limiti");
         if(!LOADED)throw new Exception("Motore nativo llama.cpp non caricato: "+LOAD_ERROR);
         if(!models.isReady())throw new Exception("Scarica prima entrambi i file Qwen3-VL");
         // Smaller preview limits CPU and multimodal prefill cost on Tensor G2.
-        final int maxEdge=640;
         Bitmap small=image;
         int longest=Math.max(image.getWidth(),image.getHeight());
         if(longest>maxEdge){
@@ -59,7 +66,7 @@ public final class NativeQwenVision {
             int[] pixels=new int[w*h];
             small.getPixels(pixels,0,w,0,0,w,h);
             return process(models.modelFile().getAbsolutePath(),
-                models.projectorFile().getAbsolutePath(),pixels,w,h,prompt,880,progress);
+                models.projectorFile().getAbsolutePath(),pixels,w,h,prompt,tokens,progress);
         }finally{
             if(small!=image)small.recycle();
         }
