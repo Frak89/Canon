@@ -1,6 +1,8 @@
 #include <jni.h>
 #include <android/log.h>
 #include <atomic>
+#include <chrono>
+#include <cstdint>
 #include <algorithm>
 #include <mutex>
 #include <stdexcept>
@@ -19,6 +21,31 @@ namespace {
 std::mutex inference_lock;
 std::once_flag initialization;
 std::atomic_bool stop_requested{false};
+
+// Timeout is evaluated inside the CPU computation callbacks, not just
+// between UI stages. The Qwen image encoder can otherwise block for 20+ min.
+struct RunDeadline {
+    std::chrono::steady_clock::time_point until;
+    uint64_t visited=0;
+    bool exceeded() const {
+        return std::chrono::steady_clock::now() >= until;
+    }
+};
+bool abort_cpu(void* opaque) {
+    auto* state=static_cast<RunDeadline*>(opaque);
+    return stop_requested.load(std::memory_order_relaxed) ||
+        (state && state->exceeded());
+}
+bool observe_vision(struct ggml_tensor*,bool ask,void* opaque) {
+    auto* state=static_cast<RunDeadline*>(opaque);
+    if(ask){
+        // Observe every 16th node rather than forcing a costly callback
+        // for every layer operation in the CPU-only image tower.
+        return state && ((++state->visited & 15U)==0U);
+    }
+    return !abort_cpu(opaque);
+}
+
 
 /**
  * Report real native stages; percentage is shown only while token generation
@@ -120,10 +147,16 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_com_ampyeos_canon_NativeQwenVision_process(
     JNIEnv* env,jclass,jstring javaModel,jstring javaProjector,
     jintArray javaPixels,jint width,jint height,jstring javaPrompt,jint maxTokens,
-    jobject listener) {
+    jint maxImageTokens,jint budgetSeconds,jobject listener) {
     std::lock_guard<std::mutex> guard(inference_lock);
     stop_requested=false;
     try {
+        if(maxImageTokens<16||maxImageTokens>512||budgetSeconds<20||budgetSeconds>300)
+            throw std::runtime_error("Profilo di inferenza fuori limiti");
+        RunDeadline deadline{
+            std::chrono::steady_clock::now() +
+            std::chrono::seconds(budgetSeconds)
+        };
         stage(env,listener,"Inizializzazione motore llama.cpp");
         std::call_once(initialization, [](){
             llama_backend_init();
@@ -149,9 +182,11 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
         stage(env,listener,"Allocazione memoria e contesto Qwen");
 
         auto contextParams=llama_context_default_params();
-        contextParams.n_ctx=4096;
-        contextParams.n_batch=512;
-        contextParams.n_ubatch=512;
+        contextParams.n_ctx=2048;
+        contextParams.n_batch=256;
+        contextParams.n_ubatch=256;
+        contextParams.abort_callback=abort_cpu;
+        contextParams.abort_callback_data=&deadline;
         contextParams.n_threads=4;
         contextParams.n_threads_batch=4;
         session.context=llama_init_from_model(session.model,contextParams);
@@ -164,6 +199,12 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
         imageParams.use_gpu=false;
         imageParams.n_threads=4;
         imageParams.warmup=false;
+        // Qwen3-VL supports variable-resolution visual inputs.
+        // Default model metadata can request many more patches than needed.
+        imageParams.image_min_tokens=16;
+        imageParams.image_max_tokens=maxImageTokens;
+        imageParams.cb_eval=observe_vision;
+        imageParams.cb_eval_user_data=&deadline;
         session.vision=mtmd_init_from_file(projectorPath.c_str(),session.model,imageParams);
         if(!session.vision||!mtmd_support_vision(session.vision))
             throw std::runtime_error("The image projector is missing or incompatible.");
@@ -201,12 +242,18 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
         if(!chunks||mtmd_tokenize_from_parts(session.vision,chunks.get(),inputs,3,true)!=0)
             throw std::runtime_error("Vision tokens could not be produced.");
         stop_check();
-        stage(env,listener,"Analisi dell'immagine sul Pixel (encoder vision)");
+        stage(env,listener,"Encoder Qwen CPU · max "+std::to_string(maxImageTokens)+" token visivi · scadenza "+std::to_string(budgetSeconds)+"s");
 
         llama_pos next=0;
         if(mtmd_helper_eval_chunks(session.vision,session.context,chunks.get(),
-                                   0,0,512,true,&next)!=0)
-            throw std::runtime_error("The vision encoder could not evaluate the image.");
+                                   0,0,256,true,&next)!=0) {
+            if(deadline.exceeded())throw std::runtime_error(
+                "Encoder visivo troppo lento per la CPU del Pixel: tempo limite superato.");
+            stop_check();
+            throw std::runtime_error("Il processore visivo non ha completato l'analisi.");
+        }
+        if(deadline.exceeded())throw std::runtime_error(
+            "Encoder visivo troppo lento per la CPU del Pixel: tempo limite superato.");
         stop_check();
         stage(env,listener,"Generazione del verdetto fotografico",0,maxTokens);
 
@@ -222,6 +269,9 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
         std::string answer;
         try{
             for(int n=0;n<maxTokens&&!stop_requested;n++){
+                if(deadline.exceeded())
+                    throw std::runtime_error(
+                        "Tempo limite di elaborazione Qwen superato: prova il profilo rapido.");
                 llama_token token=llama_sampler_sample(sampler,session.context,-1);
                 llama_sampler_accept(sampler,token);
                 if(llama_vocab_is_eog(vocab,token))break;
