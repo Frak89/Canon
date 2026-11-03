@@ -94,6 +94,9 @@ public final class EditorActivity extends Activity {
     private Button qwenReviewButton;
     private QwenModelManager qwenModels;
     private Button qwenDownloadButton,qwenStopButton,qwenQuickButton,qwenCompareButton;
+    private android.content.SharedPreferences qwenTransferPrefs;
+    private android.content.SharedPreferences.OnSharedPreferenceChangeListener qwenTransferListener;
+    private boolean qwenTransferFinishHandled=false;
     private android.widget.ProgressBar qwenSpinner;
     private Button autoLevelToggle,autoLevelManualButton;
     private boolean autoLevelOnOpen=true;
@@ -229,16 +232,19 @@ public final class EditorActivity extends Activity {
         if(playButton!=null)AmpyButtons.setToggle(playButton,playing);
         if(autoLessonButton!=null)AmpyButtons.setToggle(autoLessonButton,autoLesson);
         boolean modelReady=qwenModels!=null&&qwenModels.isReady();
+        boolean transferActive=QwenDownloadService.isActive(this);
         if(qwenReviewButton!=null)qwenReviewButton.setEnabled(ready&&modelReady&&!qwenAnalyzing);
         if(qwenQuickButton!=null)qwenQuickButton.setEnabled(ready&&!fastBusy&&!qwenAnalyzing);
         if(qwenCompareButton!=null)qwenCompareButton.setEnabled(ready&&modelReady&&!qwenAnalyzing);
         if(qwenDownloadButton!=null){
-            qwenDownloadButton.setEnabled(!modelReady&&!qwenModels.isWorking());
-            qwenDownloadButton.setText(modelReady?
-                (qwenModels.isPersistent()?
-                    "QWEN GIÀ SALVATO IN DOWNLOAD":
-                    "QWEN NELLA VECCHIA CACHE · SALVALO"):
-                "SCARICA QWEN SOLO SE MANCA");
+            qwenDownloadButton.setEnabled(!modelReady&&!transferActive&&!qwenModels.isWorking());
+            qwenDownloadButton.setText(transferActive?
+                "QWEN IN DOWNLOAD · BACKGROUND":
+                modelReady?
+                    (qwenModels.isPersistent()?
+                        "QWEN GIÀ SALVATO IN DOWNLOAD":
+                        "QWEN NELLA VECCHIA CACHE · SALVALO"):
+                    "SCARICA QWEN SOLO SE MANCA");
         }
         if(qwenStopButton!=null)qwenStopButton.setEnabled(qwenAnalyzing&&!qwenStopRequested);
     }
@@ -336,11 +342,52 @@ public final class EditorActivity extends Activity {
         // 02. Real scene understanding is separate from pixel metrics.
         LinearLayout aiSection=section(panel,"02  MAESTRO IA · ANALISI FOTOGRAFICA",true);
         qwenModels=new QwenModelManager(this);
+        qwenTransferPrefs=QwenDownloadService.status(this);
         visionDiagnostics=new VisionDiagnostics(this);
         visionDiagnostics.add("Editor avviato, motore locale "+NativeQwenVision.available());
         visionStatus=txt("QWEN3-VL · SOLO PIXEL · "+qwenModels.state(),12);
         visionStatus.setTextColor(0xffefcc98);
         aiSection.addView(visionStatus);
+        // Download belongs to a foreground Service, NOT to this Activity.
+        // Observe persisted progress so navigation and screen-off do not
+        // interrupt a 1.55 GB transfer.
+        qwenTransferListener=(prefs,key)->{
+            if(closing||visionStatus==null)return;
+            boolean active=QwenDownloadService.isActive(this);
+            String message=prefs.getString(QwenDownloadService.KEY_MESSAGE,"");
+            boolean finished=prefs.getBoolean(QwenDownloadService.KEY_FINISHED,false);
+            if(active)qwenTransferFinishHandled=false;
+            if(!qwenAnalyzing&&(active||finished))
+                visionStatus.setText("QWEN · "+message);
+            if(qwenSpinner!=null&&!qwenAnalyzing) {
+                qwenSpinner.setVisibility(active?View.VISIBLE:View.GONE);
+                long total=prefs.getLong(QwenDownloadService.KEY_TOTAL,0);
+                long bytes=prefs.getLong(QwenDownloadService.KEY_BYTES,0);
+                qwenSpinner.setIndeterminate(total<=0||bytes<=0);
+                if(total>0&&bytes>0) {
+                    qwenSpinner.setMax(100);
+                    qwenSpinner.setProgress((int)Math.min(100,bytes*100L/total));
+                }
+            }
+            updateButtonAvailability();
+            if(finished&&!qwenTransferFinishHandled){
+                qwenTransferFinishHandled=true;
+                // After service completes, refresh this Activity's own model
+                // descriptors instead of assuming that its stale state is ready.
+                qwenModels.prepare(new QwenModelManager.Listener(){
+                    @Override public void onProgress(String progress,long done,long total){
+                        if(!closing && !qwenAnalyzing)
+                            visionStatus.setText("QWEN · "+progress);
+                    }
+                    @Override public void onComplete(boolean success,String result){
+                        if(closing)return;
+                        if(!qwenAnalyzing)visionStatus.setText("QWEN · "+result);
+                        updateButtonAvailability();
+                    }
+                });
+            }
+        };
+        qwenTransferPrefs.registerOnSharedPreferenceChangeListener(qwenTransferListener);
         qwenSpinner=new android.widget.ProgressBar(this,null,
             android.R.attr.progressBarStyleHorizontal);
         qwenSpinner.setIndeterminate(true);
@@ -515,8 +562,13 @@ public final class EditorActivity extends Activity {
                 .setPositiveButton("OK",null).show());
         stillSubject=new SubjectAi();
         updateButtonAvailability();
-        // Run on a worker: hashing 1.55GB must never block the editor.
-        visionStatus.setText("QWEN · Cerco modelli in Download/AmpyEOS/Qwen3-VL…");
+        // A service already downloading remains active after this screen closes.
+        if(QwenDownloadService.isActive(this)){
+            visionStatus.setText("QWEN · "+
+                qwenTransferPrefs.getString(QwenDownloadService.KEY_MESSAGE,
+                    "Download in background, apri la notifica per i progressi"));
+        }else visionStatus.setText(
+            "QWEN · Cerco modelli esistenti in Download/AmpyEOS/Qwen3-VL…");
         qwenModels.prepare(new QwenModelManager.Listener(){
             @Override public void onProgress(String message,long bytes,long total){
                 if(!closing)visionStatus.setText("QWEN · "+message);
@@ -1765,7 +1817,10 @@ public final class EditorActivity extends Activity {
         if(speech!=null){speech.stop();speech.shutdown();}
         if(stillSubject!=null)stillSubject.close();
         if(extraRecognition!=null)extraRecognition.close();
+        if(qwenTransferPrefs!=null&&qwenTransferListener!=null)
+            qwenTransferPrefs.unregisterOnSharedPreferenceChangeListener(qwenTransferListener);
         if(qwenModels!=null)qwenModels.close();
+        // The independent QwenDownloadService MUST NOT be stopped here.
         // Stop an active native decode before Activity resources disappear.
         if(NativeQwenVision.available())NativeQwenVision.cancel();
         worker.shutdownNow();
