@@ -7,12 +7,23 @@ android {
         applicationId = "com.ampyeos.canon"
         minSdk = 30
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.6.0"
+        ndk { abiFilters += listOf("arm64-v8a") }
+        externalNativeBuild {
+            cmake { cppFlags += listOf("-O2", "-std=c++17") }
+        }
+        versionCode = 11
+        versionName = "0.7.0"
     }
     buildTypes {
         release { isMinifyEnabled = false }
         debug { isMinifyEnabled = false }
+    }
+    ndkVersion = "27.2.12479018"
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
