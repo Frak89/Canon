@@ -84,8 +84,9 @@ public final class QwenModelManager {
     public String state(){
         if(isReady()){
             if(!modelLegacy&&!projectorLegacy)
-                return "Qwen3-VL pronto · modello persistente in Download/AmpyEOS/Qwen3-VL";
-            return "Qwen3-VL presente nella vecchia cache; copia in Download in preparazione";
+                return "Qwen3-VL pronto · 2 GGUF persistenti nella memoria condivisa";
+            return "Qwen3-VL funzionante SOLO nella vecchia cache privata: "+
+                "NON disinstallare prima di salvare i file in Download";
         }
         if(isWorking())return lastMessage;
         if(!scanned)return "Verifico Qwen3-VL in Download/AmpyEOS/Qwen3-VL…";
@@ -107,9 +108,14 @@ public final class QwenModelManager {
                 report(listener,"Cerco modelli Qwen già scaricati in Download…",0);
                 scan(listener);
                 finish(listener,true,isReady()?
-                    "Qwen3-VL recuperato da Download: nessun download necessario.":
-                    "Nessun modello Qwen completo trovato. "+
-                    "Puoi scegliere i GGUF già presenti con IMPORTA DA DOWNLOAD.");
+                    (modelLegacy||projectorLegacy?
+                        "Qwen già disponibile nella vecchia cache privata, ma non copiato "+
+                        "integralmente in Download. NON disinstallare! "+
+                        "Libera almeno 1,2 GB e premi SALVA MODELLI IN DOWNLOAD.":
+                        "Qwen recuperato dalla memoria condivisa. "+
+                        "Nessun download da Internet.") :
+                    "Modelli Qwen incompleti. Usa IMPORTA GGUF DA DOWNLOAD "+
+                    "prima di scaricarli ancora.");
             }catch(Exception e){
                 finish(listener,false,"Ricerca modelli: "+e.getMessage());
             }finally{busy.set(false);}
@@ -224,8 +230,9 @@ public final class QwenModelManager {
                 if(filename.equals(MODEL)){modelUri=document;modelLegacy=false;}
                 else {projectorUri=document;projectorLegacy=false;}
                 scanned=true;
-                finish(listener,true,"File riconosciuto senza riscaricare: "+filename+
-                    ". "+(isReady()?"Qwen offline pronto.":"Scegli anche l'altro GGUF da Download."));
+                finish(listener,true,"File collegato e verificato senza riscaricare: "+filename+
+                    ". "+(isReady()?"Qwen offline pronto.":"Scegli anche l'altro GGUF da Download.")+
+                    " Non spostare o cancellare il file selezionato.");
             }catch(Exception e){
                 finish(listener,false,"Importazione Qwen: "+e.getMessage());
             }finally{busy.set(false);}
@@ -265,8 +272,11 @@ public final class QwenModelManager {
                     prefs.edit().putString("document_"+PROJECTOR,uri.toString()).apply();
                 }
                 finish(listener,isReady(),isReady()?
-                    "Qwen installato in Download/AmpyEOS/Qwen3-VL. "+
-                    "Resterà sul telefono anche dopo la disinstallazione.":
+                    (modelLegacy||projectorLegacy?
+                        "Qwen pronto nella vecchia cache, ma almeno un file non è "+
+                        "ancora salvato in Download. Usa SALVA MODELLI IN DOWNLOAD.":
+                        "Qwen disponibile nella memoria condivisa Download. "+
+                        "I file restano anche dopo disinstallazione e aggiornamenti."):
                     "Modello incompleto: importa il file mancante.");
             }catch(Exception e){
                 finish(listener,false,(cancelled?"Download sospeso: ":"Download Qwen: ")+
