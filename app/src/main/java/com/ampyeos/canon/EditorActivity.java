@@ -52,6 +52,7 @@ public final class EditorActivity extends Activity {
     private static final int PICK=1, PICK_GROUP=2, PICK_MODEL=3, PICK_MUSIQ=4, PICK_QWEN=5, CYAN=0xff43eadb, BG=0xff080f1a;
     private final Handler ui=new Handler(Looper.getMainLooper());
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
+    private final ExecutorService visionWorker=Executors.newSingleThreadExecutor();
     private final AtomicInteger generation=new AtomicInteger();
     private Bitmap original, working, display;
     private Uri originUri;
@@ -1203,7 +1204,7 @@ public final class EditorActivity extends Activity {
         ui.removeCallbacks(qwenTicker);
         qwenTicker.run();
 
-        worker.execute(()->{
+        visionWorker.execute(()->{
             Bitmap composite=null;
             try{
                 if(qwenStopRequested)
@@ -1327,28 +1328,124 @@ public final class EditorActivity extends Activity {
     private void autoStraighten(){
         if(working==null){caption.setText("Apri una fotografia.");return;}
         Bitmap src=working;
-        caption.setText("Analizzo le linee orizzontali: ruoto solo se affidabili…");
+        caption.setText("Analizzo le linee geometriche prima del raddrizzamento…");
         worker.execute(()->{
             try{
-                VisualInspector.Report candidate=VisualInspector.analyze(src);
-                Bitmap output=AutoOptimizer.straighten(src,
-                    candidate.lineAngleDegrees,candidate.lineConfidence);
+                AutoLevel.Result candidate=AutoLevel.estimate(src);
+                Bitmap output=AutoLevel.corrected(src,candidate);
                 ui.post(()->{
-                    if(closing||working!=src)return;
-                    if(output==src){
-                        caption.setText("Nessuna correzione affidabile: evita di inclinare inutilmente lo scatto.");
+                    if(closing||working!=src){
+                        if(output!=src)output.recycle();
                         return;
                     }
-                    working=output;crop.setBitmapSize(output.getWidth(),output.getHeight());
-                    caption.setText(String.format(Locale.ITALIAN,
-                        "AUTO RADDRIZZA: corretti %.1f° (linea candidata, non necessariamente orizzonte)",
-                        candidate.lineAngleDegrees));
-                    report.setText("La rotazione corregge una linea dominante "+
-                        "e implica un piccolo ritaglio. Verifica che non sia una diagonale intenzionale.");
-                    refresh();
+                    if(output==src){
+                        caption.setText(candidate.summary()+
+                            " Usa CORREZIONE FINE ±10° per intervenire a mano.");
+                        return;
+                    }
+                    working=output;before=false;crop.setBitmapSize(output.getWidth(),output.getHeight());
+                    lastAutoLevel=candidate;visionResult=null;comparisonVerdict="";
+                    caption.setText(candidate.summary());
+                    report.setText("ROT AZIONE PROPOSTA · "+candidate.summary()+
+                        "\nControlla il risultato con SPLIT PRIMA / DOPO. "+
+                        "Il JPEG sorgente rimane intatto.");
+                    refresh();updateButtonAvailability();
                 });
-            }catch(Exception e){ui.post(()->caption.setText("Raddrizzamento: "+e.getMessage()));}
+            }catch(Exception e){
+                ui.post(()->caption.setText("Auto Raddrizza: "+e.getMessage()));
+            }
         });
+    }
+
+    /**
+     * Fine leveling is available when the scene lacks reliable geometric cues.
+     * The dialog previews a reduced bitmap; the accepted transform is applied
+     * to the working copy off the main thread, never to the source file.
+     */
+    private void manualStraighten(){
+        final Bitmap src=working;
+        if(src==null){caption.setText("Apri una foto prima di regolarla.");return;}
+        int big=Math.max(src.getWidth(),src.getHeight());
+        float ratio=Math.min(1,600f/Math.max(1,big));
+        final Bitmap small=Bitmap.createScaledBitmap(src,
+            Math.max(1,Math.round(src.getWidth()*ratio)),
+            Math.max(1,Math.round(src.getHeight()*ratio)),true);
+
+        LinearLayout dialogContent=new LinearLayout(this);
+        dialogContent.setOrientation(LinearLayout.VERTICAL);
+        dialogContent.setPadding(dp(12),dp(12),dp(12),dp(8));
+        TextView label=txt("Inclinazione corretta: 0,0°",13);
+        dialogContent.addView(label);
+        ImageView preview=new ImageView(this);
+        preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        preview.setBackgroundColor(Color.BLACK);
+        dialogContent.addView(preview,new LinearLayout.LayoutParams(-1,dp(260)));
+        preview.setImageBitmap(small);
+        SeekBar degree=new SeekBar(this);
+        degree.setMax(200);degree.setProgress(100);
+        dialogContent.addView(degree);
+        TextView caution=txt("Muovi il cursore tra −10° e +10°. "+
+            "Il ritaglio compensa i bordi scuri. L'originale resta intatto.",11);
+        dialogContent.addView(caution);
+        final Bitmap[] onScreen={small};
+        degree.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            @Override public void onProgressChanged(SeekBar b,int progress,boolean user){
+                if(!user)return;
+                float tilt=(progress-100)/10f;
+                label.setText(String.format(Locale.ITALIAN,
+                    "Correzione fine · %.1f°",tilt));
+                Bitmap next=AutoOptimizer.rotateAndCrop(small,tilt);
+                preview.setImageBitmap(next);
+                if(onScreen[0]!=small&&onScreen[0]!=src&&onScreen[0]!=next)
+                    onScreen[0].recycle();
+                onScreen[0]=next;
+            }
+            @Override public void onStartTrackingTouch(SeekBar b){}
+            @Override public void onStopTrackingTouch(SeekBar b){}
+        });
+        AlertDialog dialog=new AlertDialog.Builder(this)
+            .setTitle("RADDRIZZAMENTO FINE")
+            .setView(dialogContent)
+            .setNegativeButton("ANNULLA",null)
+            .setPositiveButton("APPLICA",(d,w)->{
+                final float correction=(degree.getProgress()-100)/10f;
+                if(Math.abs(correction)<.09f){
+                    caption.setText("Correzione fine: nessuna rotazione applicata.");
+                    return;
+                }
+                caption.setText("Applico rotazione di "+
+                    String.format(Locale.ITALIAN,"%.1f°",correction)+" alla copia…");
+                worker.execute(()->{
+                    try{
+                        Bitmap adjusted=AutoOptimizer.rotateAndCrop(src,correction);
+                        ui.post(()->{
+                            if(closing||working!=src){
+                                if(adjusted!=src)adjusted.recycle();
+                                return;
+                            }
+                            working=adjusted;before=false;
+                            visionResult=null;comparisonVerdict="";
+                            crop.setBitmapSize(adjusted.getWidth(),adjusted.getHeight());
+                            crop.setCropEnabled(false);
+                            caption.setText(String.format(Locale.ITALIAN,
+                                "Correzione fine applicata: %.1f°. "+
+                                "Originale preservato.",correction));
+                            report.setText("Correzione geometrica manuale: "+
+                                correction+"°. Usa MOSTRA ORIGINALE o RIPRISTINA per confrontare.");
+                            refresh();updateButtonAvailability();
+                        });
+                    }catch(Exception e){
+                        ui.post(()->caption.setText("Rotazione: "+e.getMessage()));
+                    }
+                });
+            })
+            .create();
+        dialog.setOnDismissListener(v->{
+            preview.setImageDrawable(null);
+            if(onScreen[0]!=small&&onScreen[0]!=src)onScreen[0].recycle();
+            if(small!=src)small.recycle();
+        });
+        dialog.show();
     }
     private void autoTone(){
         if(working==null){caption.setText("Apri una fotografia.");return;}
@@ -1478,6 +1575,7 @@ public final class EditorActivity extends Activity {
         // Stop an active native decode before Activity resources disappear.
         if(NativeQwenVision.available())NativeQwenVision.cancel();
         worker.shutdownNow();
+        visionWorker.shutdownNow();
         super.onDestroy();
     }
 }
