@@ -36,6 +36,8 @@ public final class NativeQwenVision {
         int[] pixels,int width,int height,String prompt,int maximumTokens,
         int maxImageTokens,int budgetSeconds,ProgressListener progress);
     public static native void cancel();
+    /** Release cached model and vision encoder explicitly when needed. */
+    public static native void releaseModels();
 
     public static String analyze(Bitmap image,QwenModelManager models,String prompt)
             throws Exception {
@@ -43,9 +45,9 @@ public final class NativeQwenVision {
     }
     public static String analyze(Bitmap image,QwenModelManager models,String prompt,
                                  ProgressListener progress) throws Exception {
-        return analyze(image,models,prompt,progress,320,480,120);
+        return analyze(image,models,prompt,progress,0,1100,180);
     }
-    /** Adjustable fidelity: quick=448px/480 tokens, deep=640px/1100 tokens. */
+    /** maxEdge=0 means full decoded image (no additional downsampling). */
     public static String analyze(Bitmap image,QwenModelManager models,String prompt,
                                  ProgressListener progress,int maxEdge,int tokens)
             throws Exception {
@@ -58,15 +60,16 @@ public final class NativeQwenVision {
     public static String analyze(Bitmap image,QwenModelManager models,String prompt,
                                  ProgressListener progress,int maxEdge,int tokens,
                                  int budgetSeconds)throws Exception {
-        if(maxEdge<196||maxEdge>768||tokens<100||tokens>1200 ||
-            budgetSeconds<20||budgetSeconds>300)
+        if(maxEdge<0||maxEdge>8192||tokens<100||tokens>1800 ||
+            budgetSeconds<20||budgetSeconds>900)
             throw new IllegalArgumentException("Profilo Qwen non valido");
         if(!LOADED)throw new Exception("Motore nativo llama.cpp non caricato: "+LOAD_ERROR);
         if(!models.isReady())throw new Exception("Scarica prima entrambi i file Qwen3-VL");
-        // Smaller preview limits CPU and multimodal prefill cost on Tensor G2.
+        // Keep the original decoded pixels: no forced 320/448px degradation.
+        // GPU acceleration and cached weights must improve throughput instead.
         Bitmap small=image;
         int longest=Math.max(image.getWidth(),image.getHeight());
-        if(longest>maxEdge){
+        if(maxEdge>0 && longest>maxEdge){
             float scale=maxEdge/(float)longest;
             small=Bitmap.createScaledBitmap(image,Math.max(1,Math.round(image.getWidth()*scale)),
                 Math.max(1,Math.round(image.getHeight()*scale)),true);
@@ -79,11 +82,10 @@ public final class NativeQwenVision {
             // allowing llama.cpp to mmap the actual GGUF in public Download.
             // No second 1.55GB private copy is required.
             try(QwenPersistentStore.OpenModels open=models.openForInference()){
-                // Restrict visual tokens *inside* the image preprocessor, too.
-                int imageTokens=Math.min(192,Math.max(32,
-                    (int)Math.ceil((double)w*h/(28.0*28.0))));
+                // 0 = model metadata's native image-token budget, not a
+                // disguised reduction in scene resolution.
                 return process(open.languagePath(),open.projectorPath(),
-                    pixels,w,h,prompt,tokens,imageTokens,budgetSeconds,progress);
+                    pixels,w,h,prompt,tokens,0,budgetSeconds,progress);
             }
         }finally{
             if(small!=image)small.recycle();
