@@ -136,7 +136,7 @@ public final class QwenPersistentStore {
     }
     public String publicModelFilesStatus(){
         StringBuilder status=new StringBuilder("Memoria condivisa: "+
-            "Download/AmpyEOS/Qwen3-VL/\\n");
+            "Download/AmpyEOS/Qwen3-VL/\n");
         String[] names={QwenModelManager.MODEL,QwenModelManager.PROJECTOR};
         for(String name:names){
             Uri full=find(name),partial=find(name+".part");
@@ -146,9 +146,9 @@ public final class QwenPersistentStore {
             else status.append("NON PRESENTE");
             if(staging>=0)status.append(" · parziale ")
                 .append(staging/1048576).append(" MiB");
-            status.append('\\n');
+            status.append('\n');
         }
-        if(!lastError.isEmpty())status.append("MediaStore: ").append(lastError).append('\\n');
+        if(!lastError.isEmpty())status.append("MediaStore: ").append(lastError).append('\n');
         status.append("Se i file esistono nel gestore Download ma qui non compaiono, "+
             "selezionali con IMPORTA GGUF DA DOWNLOAD per concedere accesso.");
         return status.toString();
