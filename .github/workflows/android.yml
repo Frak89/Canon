@@ -57,6 +57,27 @@ jobs:
         run: bash scripts/fetch_llama_cpp.sh
       - name: Verify downloadable AI model and labels
         run: bash scripts/verify_ai_models.sh
+      - name: Restore persistent APK signing (optional)
+        env:
+          AMPYEOS_KEYSTORE_BASE64: ${{ secrets.AMPYEOS_KEYSTORE_BASE64 }}
+          AMPYEOS_STORE_PASSWORD_SECRET: ${{ secrets.AMPYEOS_STORE_PASSWORD }}
+          AMPYEOS_KEY_ALIAS_SECRET: ${{ secrets.AMPYEOS_KEY_ALIAS }}
+          AMPYEOS_KEY_PASSWORD_SECRET: ${{ secrets.AMPYEOS_KEY_PASSWORD }}
+        run: |
+          if [ -n "$AMPYEOS_KEYSTORE_BASE64" ] && \
+             [ -n "$AMPYEOS_STORE_PASSWORD_SECRET" ] && \
+             [ -n "$AMPYEOS_KEY_ALIAS_SECRET" ] && \
+             [ -n "$AMPYEOS_KEY_PASSWORD_SECRET" ]; then
+            printf '%s' "$AMPYEOS_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/ampyeos-signing.jks"
+            chmod 600 "$RUNNER_TEMP/ampyeos-signing.jks"
+            echo "AMPYEOS_SIGNING_FILE=$RUNNER_TEMP/ampyeos-signing.jks" >> "$GITHUB_ENV"
+            echo "AMPYEOS_SIGNING_PASSWORD=$AMPYEOS_STORE_PASSWORD_SECRET" >> "$GITHUB_ENV"
+            echo "AMPYEOS_SIGNING_ALIAS=$AMPYEOS_KEY_ALIAS_SECRET" >> "$GITHUB_ENV"
+            echo "AMPYEOS_SIGNING_KEY_PASSWORD=$AMPYEOS_KEY_PASSWORD_SECRET" >> "$GITHUB_ENV"
+            echo "Persistent signature configured; debug updates will keep the same signing certificate."
+          else
+            echo "::warning::No permanent signing key configured. Different CI debug APKs may require uninstall. Set four repository Action secrets to allow in-place updates."
+          fi
       - name: Build APK
         run: gradle --no-daemon --stacktrace :app:assembleDebug
       - name: Upload APK
