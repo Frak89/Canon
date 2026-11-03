@@ -297,8 +297,12 @@ public final class QwenModelManager {
             try {
                 scan(listener); // Recover any existing file BEFORE making HTTP requests.
                 if(isReady()){
-                    finish(listener,true,"Modelli già salvati in Download. "+
-                        "Nessun dato scaricato da Internet.");
+                    finish(listener,true,isPersistent()?
+                        "I due modelli Qwen sono già salvati nella cartella Download. "+
+                            "Nessun dato riscaricato.":
+                        "I due modelli funzionano nella VECCHIA memoria privata, "+
+                            "ma non sono ancora entrambi in Download. "+
+                            "NON DISINSTALLARE; premi SALVA MODELLI IN DOWNLOAD.");
                     return;
                 }
                 long remaining=(modelUri!=null||modelLegacy?0:MODEL_SIZE)+
