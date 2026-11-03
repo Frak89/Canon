@@ -453,8 +453,10 @@ public final class EditorActivity extends Activity {
 
         // 07. Infrequent setup actions are grouped at the very bottom.
         LinearLayout modelsSection=section(panel,"07  MODELLI IA · DOWNLOAD & ARCHIVIO",false);
+        LinearLayout publicModels=paired(modelsSection);
         qwenDownloadButton=gridAction("SCARICA QWEN SOLO SE MANCA",
-            paired(modelsSection),v->downloadQwen());
+            publicModels,v->downloadQwen());
+        gridAction("SALVA MODELLI IN DOWNLOAD",publicModels,v->saveQwenToDownloads());
         LinearLayout downloadPair=paired(modelsSection);
         gridAction("IMPORTA GGUF DA DOWNLOAD",downloadPair,v->pickQwen());
         gridAction("SOSPENDI DOWNLOAD",downloadPair,v->{
@@ -1159,6 +1161,24 @@ public final class EditorActivity extends Activity {
             @Override public void onComplete(boolean success,String message){
                 if(closing)return;
                 visionStatus.setText("Qwen3-VL · "+message);
+                updateButtonAvailability();
+            }
+        });
+    }
+
+    /** Copies verified model files from the previous private cache when possible.
+     *  Never makes a network request or deletes the only valid copy. */
+    private void saveQwenToDownloads(){
+        if(qwenModels==null)return;
+        visionStatus.setText("QWEN · Controllo e salvataggio in "+
+            "Download/AmpyEOS/Qwen3-VL, senza Internet…");
+        qwenModels.prepare(new QwenModelManager.Listener(){
+            @Override public void onProgress(String message,long bytes,long total){
+                if(!closing)visionStatus.setText("QWEN · "+message);
+            }
+            @Override public void onComplete(boolean success,String message){
+                if(closing)return;
+                visionStatus.setText("QWEN · "+message);
                 updateButtonAvailability();
             }
         });
