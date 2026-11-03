@@ -1,6 +1,21 @@
-# AmpyEOS 0.8.0 — Studio Pro, Qwen Vision e Auto Raddrizza
+# AmpyEOS 0.8.1 — Studio Pro · Qwen persistente in Download
 
 App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
+
+## Novità v0.8.1 · Qwen scaricato una volta sola
+
+- **Cartella permanente dei due GGUF:** `Download/AmpyEOS/Qwen3-VL/`, tramite `MediaStore.Downloads`. Questa cartella rimane dopo la disinstallazione, diversamente dal precedente `getFilesDir()`.
+- **Ricerca automatica all'avvio:** AmpyEOS controlla prima i modelli già presenti e l'integrità SHA-256 **senza alcuna connessione Internet**. Solo i file mancanti possono essere scaricati esplicitamente.
+- **Migrazione della vecchia cache:** installa il nuovo APK **sopra la versione corrente senza disinstallarla**. Se i vecchi GGUF sono ancora nella cartella privata, AmpyEOS li copia in Download e li verifica prima di eliminarne la copia precedente. Se lo spazio non basta, la vecchia copia rimane e viene mostrato un avviso di non disinstallare.
+- **Pulsante SALVA MODELLI IN DOWNLOAD**, per ripetere il controllo e il trasferimento senza riscaricare.
+- **Selezione senza duplicazione:** se Android limita l'accesso dopo disinstallazione, `IMPORTA GGUF DA DOWNLOAD` ricollega i file tramite il selettore Android e salva il permesso di lettura.
+- **Inferenza diretta da Downloads:** il motore JNI usa descrittori `ParcelFileDescriptor` mantenuti aperti per tutto il caricamento; niente seconda copia di lavoro da 1,55 GB.
+- **Ripresa dei download interrotti:** file `.part` pubblici, richiesta HTTP Range, verifica completa dimensione + SHA-256 + GGUF prima della rinomina.
+- Fotografie analizzate **solo localmente**. Internet è usato esclusivamente per i download richiesti e le normali funzioni rete della fotocamera.
+
+**Guida:** [docs/AmpyEOS_Rev081_Persistent_Models.md](docs/AmpyEOS_Rev081_Persistent_Models.md)
+
+> La build CI verifica che codice Android e JNI compilino. L'accesso e il recupero dei file pubblici tramite Android MediaStore, incluso il caso di reinstallazione, devono essere provati sul Pixel 7 Pro reale. Il sistema non promette di resistere alla cancellazione manuale dei GGUF o a un reset del telefono.
 
 ## Novità v0.8.0 — interfaccia professionale e foto automaticamente dritte
 
