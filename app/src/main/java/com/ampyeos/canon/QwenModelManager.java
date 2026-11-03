@@ -85,6 +85,13 @@ public final class QwenModelManager {
         return isReady() && !modelLegacy && !projectorLegacy;
     }
     public boolean isWorking(){return busy.get();}
+    /** Explicit, read-only report of files actually visible to AmpyEOS. */
+    public String filesReport(){
+        return shared.publicModelFilesStatus()+"\n"+
+            (isReady()?"Modelli associati: entrambi pronti.":
+                "Modelli non ancora caricabili: verifica i due GGUF, "+
+                "oppure ricollegali dal gestore Download.");
+    }
     public String state(){
         if(isReady()){
             if(!modelLegacy&&!projectorLegacy)
@@ -107,6 +114,7 @@ public final class QwenModelManager {
     public void prepare(Listener listener){
         if(closed)return;
         if(!busy.compareAndSet(false,true))return;
+        cancelled=false;
         queue.execute(()->{
             try{
                 report(listener,"Cerco modelli Qwen già scaricati in Download…",0);
@@ -306,7 +314,9 @@ public final class QwenModelManager {
             partial=shared.create(filename+".part");
             offset=0;
         }
-        report(listener,"Download in Download/AmpyEOS/Qwen3-VL: "+filename,offset);
+        final long progressBase=filename.equals(PROJECTOR)?MODEL_SIZE:0L;
+        report(listener,"Download in Download/AmpyEOS/Qwen3-VL: "+filename,
+            progressBase+offset);
         if(offset<expected) {
             HttpURLConnection connection=openPinnedRedirect(new URL(BASE+filename),offset);
             try{
@@ -338,7 +348,8 @@ public final class QwenModelManager {
                         out.write(buffer,0,n);
                         if(current-lastShown>=8L*1024*1024){
                             report(listener,filename+": "+(current/1024/1024)+
-                                " / "+(expected/1024/1024)+" MiB",current);
+                                " / "+(expected/1024/1024)+" MiB",
+                                progressBase+current);
                             lastShown=current;
                         }
                     }
@@ -350,7 +361,8 @@ public final class QwenModelManager {
         }
         if(shared.length(partial)!=expected)
             throw new Exception("GGUF parziale: non installo dati incompleti");
-        report(listener,"Verifica SHA-256 di "+filename+" (in locale)",expected);
+        report(listener,"Verifica SHA-256 di "+filename+" (in locale)",
+            progressBase+expected);
         try(InputStream in=shared.read(partial)){
             if(!sha256(in).equals(pinned)){
                 shared.discardOwnPartial(partial);
@@ -366,18 +378,23 @@ public final class QwenModelManager {
             }
         }
         shared.finish(partial,filename);
-        report(listener,"Verificato e salvato definitivamente in Download: "+filename,expected);
+        report(listener,"Verificato e salvato definitivamente in Download: "+filename,
+            progressBase+expected);
         return partial;
     }
-    private static String sha256(File file)throws Exception{
+    private String sha256(File file)throws Exception{
         try(InputStream in=new BufferedInputStream(new FileInputStream(file),128*1024)){
             return sha256(in);
         }
     }
-    private static String sha256(InputStream in)throws Exception{
+    private String sha256(InputStream in)throws Exception{
         MessageDigest digest=MessageDigest.getInstance("SHA-256");
         byte[] bytes=new byte[128*1024];int n;
-        while((n=in.read(bytes))!=-1)digest.update(bytes,0,n);
+        while((n=in.read(bytes))!=-1){
+            if(cancelled||closed||Thread.currentThread().isInterrupted())
+                throw new java.io.IOException("Verifica modello interrotta; file conservato");
+            digest.update(bytes,0,n);
+        }
         StringBuilder hex=new StringBuilder(64);
         for(byte b:digest.digest())hex.append(String.format(Locale.ROOT,"%02x",b&255));
         return hex.toString();
