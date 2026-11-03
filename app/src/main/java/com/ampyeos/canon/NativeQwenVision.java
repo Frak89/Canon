@@ -1,7 +1,6 @@
 package com.ampyeos.canon;
 
 import android.graphics.Bitmap;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * JNI bridge into llama.cpp + libmtmd, in the AmpyEOS app process.
@@ -35,7 +34,7 @@ public final class NativeQwenVision {
     }
     private static native String process(String modelPath,String projectorPath,
         int[] pixels,int width,int height,String prompt,int maximumTokens,
-        ProgressListener progress);
+        int maxImageTokens,int budgetSeconds,ProgressListener progress);
     public static native void cancel();
 
     public static String analyze(Bitmap image,QwenModelManager models,String prompt)
@@ -44,14 +43,24 @@ public final class NativeQwenVision {
     }
     public static String analyze(Bitmap image,QwenModelManager models,String prompt,
                                  ProgressListener progress) throws Exception {
-        return analyze(image,models,prompt,progress,640,880);
+        return analyze(image,models,prompt,progress,320,480,120);
     }
     /** Adjustable fidelity: quick=448px/480 tokens, deep=640px/1100 tokens. */
     public static String analyze(Bitmap image,QwenModelManager models,String prompt,
                                  ProgressListener progress,int maxEdge,int tokens)
             throws Exception {
-        if(maxEdge<320||maxEdge>1024||tokens<100||tokens>1200)
-            throw new IllegalArgumentException("Parametri di inferenza fuori limiti");
+        return analyze(image,models,prompt,progress,maxEdge,tokens,120);
+    }
+    /**
+     * A CPU budget prevents single-image analysis from occupying the
+     * Pixel indefinitely when native vision throughput is too low.
+     */
+    public static String analyze(Bitmap image,QwenModelManager models,String prompt,
+                                 ProgressListener progress,int maxEdge,int tokens,
+                                 int budgetSeconds)throws Exception {
+        if(maxEdge<196||maxEdge>768||tokens<100||tokens>1200 ||
+            budgetSeconds<20||budgetSeconds>300)
+            throw new IllegalArgumentException("Profilo Qwen non valido");
         if(!LOADED)throw new Exception("Motore nativo llama.cpp non caricato: "+LOAD_ERROR);
         if(!models.isReady())throw new Exception("Scarica prima entrambi i file Qwen3-VL");
         // Smaller preview limits CPU and multimodal prefill cost on Tensor G2.
@@ -70,8 +79,11 @@ public final class NativeQwenVision {
             // allowing llama.cpp to mmap the actual GGUF in public Download.
             // No second 1.55GB private copy is required.
             try(QwenPersistentStore.OpenModels open=models.openForInference()){
+                // Restrict visual tokens *inside* the image preprocessor, too.
+                int imageTokens=Math.min(192,Math.max(32,
+                    (int)Math.ceil((double)w*h/(28.0*28.0))));
                 return process(open.languagePath(),open.projectorPath(),
-                    pixels,w,h,prompt,tokens,progress);
+                    pixels,w,h,prompt,tokens,imageTokens,budgetSeconds,progress);
             }
         }finally{
             if(small!=image)small.recycle();
