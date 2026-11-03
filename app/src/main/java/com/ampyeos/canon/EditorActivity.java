@@ -53,6 +53,8 @@ public final class EditorActivity extends Activity {
     private final Handler ui=new Handler(Looper.getMainLooper());
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final ExecutorService visionWorker=Executors.newSingleThreadExecutor();
+    private final ExecutorService fastWorker=Executors.newSingleThreadExecutor();
+    private volatile boolean fastBusy=false;
     private final AtomicInteger generation=new AtomicInteger();
     private Bitmap original, working, display;
     private Uri originUri;
@@ -228,7 +230,7 @@ public final class EditorActivity extends Activity {
         if(autoLessonButton!=null)AmpyButtons.setToggle(autoLessonButton,autoLesson);
         boolean modelReady=qwenModels!=null&&qwenModels.isReady();
         if(qwenReviewButton!=null)qwenReviewButton.setEnabled(ready&&modelReady&&!qwenAnalyzing);
-        if(qwenQuickButton!=null)qwenQuickButton.setEnabled(ready&&modelReady&&!qwenAnalyzing);
+        if(qwenQuickButton!=null)qwenQuickButton.setEnabled(ready&&!fastBusy&&!qwenAnalyzing);
         if(qwenCompareButton!=null)qwenCompareButton.setEnabled(ready&&modelReady&&!qwenAnalyzing);
         if(qwenDownloadButton!=null){
             qwenDownloadButton.setEnabled(!modelReady&&!qwenModels.isWorking());
@@ -1670,6 +1672,7 @@ public final class EditorActivity extends Activity {
         if(NativeQwenVision.available())NativeQwenVision.cancel();
         worker.shutdownNow();
         visionWorker.shutdownNow();
+        fastWorker.shutdownNow();
         super.onDestroy();
     }
 }
