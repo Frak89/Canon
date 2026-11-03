@@ -9,6 +9,7 @@ import android.net.Uri;
 import android.os.Environment;
 import android.os.ParcelFileDescriptor;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -33,15 +34,32 @@ public final class QwenPersistentStore {
     private static Uri collection(){
         return MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
     }
+    private volatile String lastError="";
+    public String lastError(){return lastError;}
+    /**
+     * The provider may leave older partial rows after a process kill.
+     * Pick the newest matching row rather than an arbitrary old duplicate.
+     */
     public Uri find(String exactName){
         try(Cursor c=resolver.query(collection(),
-            new String[]{MediaStore.MediaColumns._ID,MediaStore.MediaColumns.SIZE},
+            new String[]{MediaStore.MediaColumns._ID,MediaStore.MediaColumns.SIZE,
+                MediaStore.MediaColumns.RELATIVE_PATH},
             MediaStore.MediaColumns.DISPLAY_NAME+"=? AND "+
                 MediaStore.MediaColumns.RELATIVE_PATH+"=?",
-            new String[]{exactName,PATH},null)){
-            if(c!=null&&c.moveToFirst())
-                return ContentUris.withAppendedId(collection(),c.getLong(0));
-        }catch(Exception ignored){}
+            new String[]{exactName,PATH},
+            MediaStore.MediaColumns.DATE_MODIFIED+" DESC")){
+            if(c!=null){
+                while(c.moveToNext()){
+                    Uri candidate=ContentUris.withAppendedId(collection(),c.getLong(0));
+                    // Avoid returning an inaccessible row and silently re-downloading.
+                    try(ParcelFileDescriptor fd=resolver.openFileDescriptor(candidate,"r")){
+                        if(fd!=null)return candidate;
+                    }catch(Exception ignored){}
+                }
+            }
+            lastError="";
+        }catch(Exception ex){lastError=ex.getClass().getSimpleName()+
+            ": "+(ex.getMessage()==null?"MediaStore non accessibile":ex.getMessage());}
         return null;
     }
     public Uri create(String name)throws IOException {
@@ -49,7 +67,8 @@ public final class QwenPersistentStore {
         values.put(MediaStore.MediaColumns.DISPLAY_NAME,name);
         values.put(MediaStore.MediaColumns.MIME_TYPE,"application/octet-stream");
         values.put(MediaStore.MediaColumns.RELATIVE_PATH,PATH);
-        // Visible partial rows allow resumed downloads even if Android kills app.
+        values.put(MediaStore.MediaColumns.IS_PENDING,0);
+        // A visible partial .part survives closing the editor or system kill.
         Uri result=resolver.insert(collection(),values);
         if(result==null)throw new IOException("Android non può creare il modello in Download");
         return result;
@@ -57,8 +76,14 @@ public final class QwenPersistentStore {
     public long length(Uri uri){
         if(uri==null)return -1;
         try(ParcelFileDescriptor fd=resolver.openFileDescriptor(uri,"r")){
-            return fd==null?-1:fd.getStatSize();
-        }catch(Exception e){return -1;}
+            if(fd!=null&&fd.getStatSize()>=0)return fd.getStatSize();
+        }catch(Exception ignored){}
+        // Some Android SAF document providers do not report descriptor size.
+        try(Cursor c=resolver.query(uri,new String[]{OpenableColumns.SIZE},
+            null,null,null)){
+            if(c!=null&&c.moveToFirst()&&!c.isNull(0))return c.getLong(0);
+        }catch(Exception ignored){}
+        return -1;
     }
     public InputStream read(Uri uri)throws IOException {
         InputStream input=resolver.openInputStream(uri);
@@ -109,6 +134,26 @@ public final class QwenPersistentStore {
         finish(target,name);
         return target;
     }
+    public String publicModelFilesStatus(){
+        StringBuilder status=new StringBuilder("Memoria condivisa: "+
+            "Download/AmpyEOS/Qwen3-VL/\\n");
+        String[] names={QwenModelManager.MODEL,QwenModelManager.PROJECTOR};
+        for(String name:names){
+            Uri full=find(name),partial=find(name+".part");
+            long complete=length(full),staging=length(partial);
+            status.append(name).append(": ");
+            if(complete>0)status.append(complete/1048576).append(" MiB (file finale)");
+            else status.append("NON PRESENTE");
+            if(staging>=0)status.append(" · parziale ")
+                .append(staging/1048576).append(" MiB");
+            status.append('\\n');
+        }
+        if(!lastError.isEmpty())status.append("MediaStore: ").append(lastError).append('\\n');
+        status.append("Se i file esistono nel gestore Download ma qui non compaiono, "+
+            "selezionali con IMPORTA GGUF DA DOWNLOAD per concedere accesso.");
+        return status.toString();
+    }
+
     public boolean isDownloadLocation(Uri uri){
         if(uri==null)return false;
         String value=uri.toString();
