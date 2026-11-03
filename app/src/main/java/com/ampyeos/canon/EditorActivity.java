@@ -88,7 +88,9 @@ public final class EditorActivity extends Activity {
     private TextView visionStatus;
     private Button qwenReviewButton;
     private QwenModelManager qwenModels;
-    private Button qwenDownloadButton,qwenStopButton;
+    private Button qwenDownloadButton,qwenStopButton,qwenQuickButton,qwenCompareButton;
+    private VisionDiagnostics visionDiagnostics;
+    private String comparisonVerdict="";
     private boolean qwenAnalyzing=false;
     private volatile boolean qwenStopRequested=false;
     private String qwenStage="Preparazione del lavoro sul Pixel";
@@ -142,6 +144,10 @@ public final class EditorActivity extends Activity {
         if(overlayButton!=null)AmpyButtons.setToggle(overlayButton,showVisual);
         if(playButton!=null)AmpyButtons.setToggle(playButton,playing);
         if(autoLessonButton!=null)AmpyButtons.setToggle(autoLessonButton,autoLesson);
+        if(qwenReviewButton!=null)qwenReviewButton.setEnabled(ready&&!qwenAnalyzing);
+        if(qwenQuickButton!=null)qwenQuickButton.setEnabled(ready&&!qwenAnalyzing);
+        if(qwenCompareButton!=null)qwenCompareButton.setEnabled(ready&&!qwenAnalyzing);
+        if(qwenStopButton!=null)qwenStopButton.setEnabled(qwenAnalyzing&&!qwenStopRequested);
     }
     private LinearLayout row(LinearLayout container){
         HorizontalScrollView sc=new HorizontalScrollView(this);sc.setHorizontalScrollBarEnabled(false);
@@ -223,6 +229,8 @@ public final class EditorActivity extends Activity {
                 "servirà un runtime Vision-Language separato.")
             .setPositiveButton("OK",null).show());
         qwenModels=new QwenModelManager(this);
+        visionDiagnostics=new VisionDiagnostics(this);
+        visionDiagnostics.add("Editor avviato · motore nativo "+NativeQwenVision.available());
         visionStatus=txt("QWEN3-VL · SOLO PIXEL · "+qwenModels.state()+
             " · Nessuna fotografia trasferita alla rete.",12);
         visionStatus.setTextColor(0xffefcc98);panel.addView(visionStatus);
@@ -232,8 +240,13 @@ public final class EditorActivity extends Activity {
         button("SOSPENDI DOWNLOAD",qwenActions,v->{
             if(qwenModels!=null)qwenModels.cancel();
         });
-        qwenReviewButton=button("ANALIZZA QWEN OFFLINE",qwenActions,v->analyzeVision());
+        qwenReviewButton=button("ANALISI PROFONDA QWEN",qwenActions,v->analyzeVision());
         qwenReviewButton.setEnabled(false);
+        qwenQuickButton=button("ANALISI RAPIDA QWEN",qwenActions,v->startQwen(true,false));
+        qwenQuickButton.setEnabled(false);
+        qwenCompareButton=button("CONFRONTA ORIGINALE / EDIT",qwenActions,v->startQwen(false,true));
+        qwenCompareButton.setEnabled(false);
+        button("DIAGNOSTICA QWEN",qwenActions,v->showQwenDiagnostics());
         qwenStopButton=button("FERMA ANALISI",qwenActions,v->{
             if(!qwenAnalyzing)return;
             qwenStopRequested=true;
@@ -472,12 +485,13 @@ public final class EditorActivity extends Activity {
                     if(closing)return;
                     stopAutoLesson();comparison.setVisibility(View.GONE);compareOn=false;
                     masterSession=null;activePlan=null;visionResult=null;
+                    comparisonVerdict="";
                     learnedResult=null;
                     learnedStatus.setText("MUSIQ · "+LearnedQuality.status(this)+
                         " · premi VALUTA QUALITÀ MUSIQ per calcolare la qualità percettiva");
                     visionStatus.setText("QWEN-VL · Foto caricata; in attesa di analisi semantica.");
                     original=b;working=b;originalReview=r;inspection=visual;
-                    qwenReviewButton.setEnabled(true);
+                    updateButtonAvailability();
                     image.setImageBitmap(b); // Show the actual decoded source immediately.
                     if(r.metrics.brightness<14 && r.metrics.detail<8)
                         modelStatus.setText("AVVISO IMMAGINE: i pixel del file risultano quasi neri. "+
@@ -513,8 +527,8 @@ public final class EditorActivity extends Activity {
                     before=false;crop.setBitmapSize(b.getWidth(),b.getHeight());
                     crop.setCropEnabled(false);crop.setAspect(0);
                     lesson.configure(b.getWidth(),b.getHeight(),r.suggestedCrop);
-                    caption.setText("VALUTAZIONE FOTOGRAFICA: "+r.scoreLabel()+
-                        " · indice tecnico luce/dettaglio "+r.metrics.score+"/100");
+                    caption.setText("FOTOGRAFIA: NON ANCORA VALUTATA · "+
+                        "Qwen per soggetto e significato; MUSIQ per qualità percettiva.");
                     report.setText("DATI VISIVI: "+visual.summary+
                         "\nPERCHÉ: "+r.why+"\nCOME: "+r.how);
                     refresh();showStep(0);updateButtonAvailability();
@@ -945,77 +959,143 @@ public final class EditorActivity extends Activity {
             }).show();
     }
 
-    private void analyzeVision(){
-        Bitmap source=original;
-        if(source==null){visionStatus.setText("Apri una foto da analizzare.");return;}
-        if(qwenAnalyzing){visionStatus.setText("Qwen è già impegnato in un'analisi.");return;}
+
+    private void analyzeVision(){startQwen(false,false);}
+
+    private void showQwenDiagnostics(){
+        String report=visionDiagnostics==null?
+            "Diagnostica non inizializzata":visionDiagnostics.report();
+        new AlertDialog.Builder(this)
+            .setTitle("Qwen3-VL · diagnostica privata")
+            .setMessage(report)
+            .setPositiveButton("COPIA LOG",(dialog,which)->{
+                android.content.ClipboardManager clipboard=
+                    (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+                if(clipboard!=null)clipboard.setPrimaryClip(
+                    android.content.ClipData.newPlainText("AmpyEOS Qwen diag",report));
+                caption.setText("Log copiato: nessuna foto, EXIF o descrizione privata inclusa.");
+            })
+            .setNegativeButton("CHIUDI",null).show();
+    }
+
+    private void startQwen(boolean quick,boolean compare) {
+        final Bitmap source=original;
+        final Bitmap proposal=(display!=null?display:working);
+        if(source==null){visionStatus.setText("Apri una fotografia prima di analizzarla.");return;}
+        if(qwenAnalyzing){visionStatus.setText("Qwen è già impegnato.");return;}
         if(qwenModels==null||!qwenModels.isReady()){
-            visionStatus.setText("QWEN3-VL · Modello non scaricato. Premi SCARICA QWEN.");
+            visionStatus.setText("QWEN · Pesature non presenti; premi SCARICA QWEN.");
             return;
         }
         if(!NativeQwenVision.available()){
-            visionStatus.setText("Motore nativo Qwen non disponibile: "+NativeQwenVision.reason());
+            visionStatus.setText("Motore nativo mancante: "+NativeQwenVision.reason());
+            visionDiagnostics.add("Libreria nativa non disponibile");
             return;
         }
+        if(visionDiagnostics.lowMemory()){
+            visionStatus.setText("RAM Android insufficiente per caricare il modello. "+
+                visionDiagnostics.memory()+". Chiudi altre app e riprova.");
+            visionDiagnostics.add("Inferenza impedita per pressione memoria");
+            return;
+        }
+        if(visionDiagnostics.severeThermal()){
+            visionStatus.setText("Temperatura del telefono troppo elevata: "+
+                "lascia raffreddare il Pixel prima dell'analisi.");
+            visionDiagnostics.add("Inferenza impedita per temperatura");
+            return;
+        }
+        final String mode=compare?"CONFRONTO FOTO":quick?"ANALISI RAPIDA":"ANALISI PROFONDA";
+        final int edge=compare?768:quick?448:640;
+        final int tokenLimit=compare?740:quick?520:1100;
         qwenStopRequested=false;
         qwenAnalyzing=true;
-        qwenStage="Lavoro in coda, inizializzazione in preparazione";
+        qwenStage="In coda · "+mode;
         qwenStartElapsed=android.os.SystemClock.elapsedRealtime();
-        qwenReviewButton.setEnabled(false);
-        qwenStopButton.setEnabled(true);
+        visionDiagnostics.add("Avvio "+mode+" · "+edge+"px, "+tokenLimit+" token · "+
+            visionDiagnostics.memory());
+        updateButtonAvailability();
         ui.removeCallbacks(qwenTicker);
         qwenTicker.run();
+
         worker.execute(()->{
+            Bitmap composite=null;
             try{
                 if(qwenStopRequested)
-                    throw new IllegalStateException("Analisi annullata prima dell'avvio");
-                String json=NativeQwenVision.analyze(source,qwenModels,
-                    LocalVisionReviewer.offlinePrompt(),
+                    throw new IllegalStateException("Operazione annullata prima dell'avvio");
+                if(compare){
+                    if(proposal==null)
+                        throw new IllegalStateException("Nessuna versione elaborata disponibile");
+                    composite=VisionComparison.arrange(source,proposal);
+                }
+                Bitmap taskBitmap=compare?composite:source;
+                String prompt=compare?VisionComparison.prompt():
+                    LocalVisionReviewer.offlinePrompt();
+                String json=NativeQwenVision.analyze(taskBitmap,qwenModels,prompt,
                     (stage,generated,limit)->{
+                        if(visionDiagnostics!=null && (generated==0||generated%120<24))
+                            visionDiagnostics.add(stage+
+                                (generated>0?" · "+generated+" token":""));
                         ui.post(()->{
                             if(closing||original!=source||!qwenAnalyzing)return;
                             qwenStage=stage+
-                                (generated>0?" · "+generated+
-                                    " token generati (limite "+limit+")":"");
-                            // Elapsed time is presented by qwenTicker; not a fake percentage.
+                                (generated>0?" · "+generated+"/"+limit+" token":"");
                         });
-                    });
+                    },edge,tokenLimit);
                 if(qwenStopRequested)
                     throw new IllegalStateException("Analisi annullata dall'utente");
-                LocalVisionReviewer.Result result=
-                    LocalVisionReviewer.parseOffline(json,"Qwen3-VL 2B (llama.cpp nativo)");
-                ui.post(()->{
-                    if(closing||original!=source)return;
-                    visionResult=result;
-                    visionStatus.setText("QWEN3-VL LOCALE · "+result.scoreLabel()+
-                        " · "+result.subject);
-                    subjectDescription=result.subject;
-                    subjectExplanation=result.scene+" "+result.composition;
-                    String description=result.narrative();
-                    report.setText(description);
-                    caption.setText("VERDETTO QWEN LOCALE: "+result.scoreLabel());
-                    teacher.setText("MAESTRO QWEN LOCALE · "+description);
-                    if(voice)say("Analisi del soggetto: "+result.subject+
-                        ". "+result.scene+". "+result.composition+
-                        ". Verdetto: "+result.scoreLabel()+". "+result.why);
-                });
+                final String currentLog=json;
+                if(compare){
+                    VisionComparison.Result result=VisionComparison.parse(currentLog);
+                    ui.post(()->{
+                        if(closing||original!=source)return;
+                        comparisonVerdict=result.asText();
+                        report.setText(comparisonVerdict);
+                        caption.setText("QWEN · confronto: "+result.decision);
+                        visionStatus.setText("QWEN3-VL · Confronto completato interamente sul Pixel.");
+                        teacher.setText("MAESTRO · "+comparisonVerdict);
+                        if(voice)say("Il confronto preferisce "+result.decision+". "+
+                            result.judgment+". "+result.nextSteps);
+                    });
+                }else{
+                    LocalVisionReviewer.Result result=
+                        LocalVisionReviewer.parseOffline(currentLog,
+                            "Qwen3-VL 2B · "+mode+" · motore Android nativo");
+                    ui.post(()->{
+                        if(closing||original!=source)return;
+                        visionResult=result;
+                        visionStatus.setText("QWEN3-VL LOCALE · "+result.scoreLabel()+
+                            " · "+result.subject);
+                        subjectDescription=result.subject;
+                        subjectExplanation=result.scene+" "+result.composition;
+                        String description=result.narrative();
+                        report.setText(description);
+                        caption.setText("VERDETTO QWEN LOCALE: "+result.scoreLabel());
+                        teacher.setText("MAESTRO QWEN LOCALE · "+description);
+                        if(voice)say("Soggetto: "+result.subject+". "+result.scene+
+                            ". Composizione: "+result.composition+
+                            ". Verdetto: "+result.scoreLabel()+". "+result.why);
+                    });
+                }
+                visionDiagnostics.add(mode+" completata · "+
+                    ((android.os.SystemClock.elapsedRealtime()-qwenStartElapsed)/1000)+" s");
             }catch(Throwable e){
+                visionDiagnostics.add(mode+" terminata senza risultato · "+
+                    (qwenStopRequested?"annullata":e.getClass().getSimpleName()));
                 ui.post(()->{
                     if(closing||original!=source)return;
                     String reason=e.getMessage()==null?
                         e.getClass().getSimpleName():e.getMessage();
-                    visionStatus.setText("QWEN3-VL LOCALE · "+
-                        (qwenStopRequested?"Analisi annullata":"Errore: "+reason));
-                    caption.setText("VALUTAZIONE NON DISPONIBILE · "+
-                        "La foto non è stata inviata fuori dal Pixel.");
+                    visionStatus.setText("QWEN · "+(qwenStopRequested?"Annullata":"Errore: "+reason));
+                    caption.setText("Analisi non riuscita: la foto resta privata e "+
+                        "nessun voto viene assegnato. Apri DIAGNOSTICA QWEN.");
                 });
             }finally{
+                if(composite!=null)composite.recycle();
                 ui.post(()->{
                     if(closing)return;
                     qwenAnalyzing=false;
                     ui.removeCallbacks(qwenTicker);
-                    qwenStopButton.setEnabled(false);
-                    qwenReviewButton.setEnabled(original!=null);
+                    updateButtonAvailability();
                 });
             }
         });
