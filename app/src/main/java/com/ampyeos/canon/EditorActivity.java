@@ -102,12 +102,22 @@ public final class EditorActivity extends Activity {
     private volatile boolean qwenStopRequested=false;
     private String qwenStage="Preparazione del lavoro sul Pixel";
     private long qwenStartElapsed=0;
+    private long qwenMaxSeconds=90;
+    private boolean qwenDeadlineIssued=false;
     private final Runnable qwenTicker=new Runnable(){
         @Override public void run(){
             if(closing||!qwenAnalyzing)return;
             long seconds=Math.max(0,(android.os.SystemClock.elapsedRealtime()-qwenStartElapsed)/1000);
+            if(seconds>qwenMaxSeconds && !qwenDeadlineIssued){
+                qwenDeadlineIssued=true;
+                qwenStopRequested=true;
+                if(NativeQwenVision.available())NativeQwenVision.cancel();
+                visionDiagnostics.add("Timeout Qwen · "+
+                    qwenMaxSeconds+" secondi (richiesta interruzione)");
+            }
             visionStatus.setText("QWEN3-VL · "+qwenStage+" · "+seconds+
-                " s trascorsi · 100% sul Pixel, senza connessione");
+                " s trascorsi · limite "+qwenMaxSeconds+
+                " s · "+(qwenDeadlineIssued?"annullamento elaborazione lenta":"analisi offline"));
             ui.postDelayed(this,3000);
         }
     };
@@ -335,9 +345,9 @@ public final class EditorActivity extends Activity {
         qwenSpinner.setVisibility(View.GONE);
         aiSection.addView(qwenSpinner,new LinearLayout.LayoutParams(-1,dp(5)));
         LinearLayout analysisPair=paired(aiSection);
-        qwenQuickButton=gridPhoto("ANALISI RAPIDA QWEN",analysisPair,
+        qwenQuickButton=gridPhoto("QWEN RAPIDO · MAX 90s",analysisPair,
             v->startQwen(true,false));
-        qwenReviewButton=gridPhoto("ANALISI PROFONDA QWEN",analysisPair,
+        qwenReviewButton=gridPhoto("QWEN PROFONDO · MAX 180s",analysisPair,
             v->analyzeVision());
         LinearLayout comparePair=paired(aiSection);
         qwenCompareButton=gridPhoto("CONFRONTA ORIGINALE / EDIT",comparePair,
@@ -1267,9 +1277,14 @@ public final class EditorActivity extends Activity {
             return;
         }
         final String mode=compare?"CONFRONTO FOTO":quick?"ANALISI RAPIDA":"ANALISI PROFONDA";
-        final int edge=compare?768:quick?448:640;
-        final int tokenLimit=compare?740:quick?520:1100;
+        // Tensor G2: vision encoder CPU-only. Keep patch count and prefill
+        // substantially lower than the original 640/768px no-limit version.
+        final int edge=compare?384:quick?224:320;
+        final int tokenLimit=compare?650:quick?500:880;
+        final int timeBudget=compare?180:quick?90:180;
         qwenStopRequested=false;
+        qwenDeadlineIssued=false;
+        qwenMaxSeconds=timeBudget;
         qwenAnalyzing=true;
         qwenStage="In coda · "+mode;
         qwenStartElapsed=android.os.SystemClock.elapsedRealtime();
@@ -1294,7 +1309,8 @@ public final class EditorActivity extends Activity {
                 Bitmap taskBitmap=compare?composite:
                     (proposal!=null?proposal:source);
                 String prompt=compare?VisionComparison.prompt():
-                    LocalVisionReviewer.offlinePrompt();
+                    quick?LocalVisionReviewer.fastPrompt():
+                        LocalVisionReviewer.offlinePrompt();
                 String json=NativeQwenVision.analyze(taskBitmap,qwenModels,prompt,
                     (stage,generated,limit)->{
                         if(visionDiagnostics!=null && (generated==0||generated%120<24))
@@ -1305,7 +1321,7 @@ public final class EditorActivity extends Activity {
                             qwenStage=stage+
                                 (generated>0?" · "+generated+"/"+limit+" token":"");
                         });
-                    },edge,tokenLimit);
+                    },edge,tokenLimit,timeBudget);
                 if(qwenStopRequested)
                     throw new IllegalStateException("Analisi annullata dall'utente");
                 final String currentLog=json;
@@ -1352,9 +1368,12 @@ public final class EditorActivity extends Activity {
                     if(closing||original!=source)return;
                     String reason=e.getMessage()==null?
                         e.getClass().getSimpleName():e.getMessage();
-                    visionStatus.setText("QWEN · "+(qwenStopRequested?"Annullata":"Errore: "+reason));
-                    caption.setText("Analisi non riuscita: la foto resta privata e "+
-                        "nessun voto viene assegnato. Apri DIAGNOSTICA QWEN.");
+                    visionStatus.setText("QWEN · "+(qwenDeadlineIssued?
+                        "Encoder troppo lento sul Pixel: limite di "+timeBudget+" s superato.":
+                        qwenStopRequested?"Analisi annullata":"Errore: "+reason));
+                    caption.setText("QWEN: nessun verdetto affidabile. "+
+                        "MUSIQ e analisi tecnica restano disponibili offline. "+
+                        "Nessuna fotografia inviata in rete. Apri DIAGNOSTICA QWEN.");
                 });
             }finally{
                 if(composite!=null)composite.recycle();
