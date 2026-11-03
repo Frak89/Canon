@@ -10,7 +10,9 @@ import java.util.List;
 public final class PhotoReview {
     public final Bitmap source;
     public final PhotoAnalyzer.Result metrics;
+    /** Always 0 until a genuine vision-language scene review is available. */
     public final int score10;
+    public String scoreLabel(){return "Non valutata · serve un modello IA visiva";}
     public final String verdict, why, how, comparison;
     public final RectF suggestedCrop;
     public final ColorLooks.Recommendation look;
@@ -24,7 +26,8 @@ public final class PhotoReview {
         PhotoAnalyzer.Result m=PhotoAnalyzer.fromBitmap(bitmap);
         ColorLooks.Recommendation look=ColorLooks.recommend(bitmap);
         RectF crop=autoCrop(bitmap);
-        int score=Math.max(1,Math.min(10,(int)Math.round(m.score/10.0)));
+        // An exposure/edge heuristic cannot assess whether a photograph has meaning.
+        int score=0;
         List<String> issues=new ArrayList<>(),fixes=new ArrayList<>();
         if(m.highlights>8) {
             issues.add(m.highlights+"% dei pixel campionati sono molto chiari: possibili dettagli persi");
@@ -58,9 +61,9 @@ public final class PhotoReview {
         String contrast="Ritaglio consigliato: riduce i bordi meno informativi preservando la zona di dettaglio maggiore. "
             +"Look suggerito: "+look.look.label+" ("+look.reason+"). "
             +"Questa proposta non cambia la scena realmente ripresa, l'illuminazione né la messa a fuoco.";
-        String verdict=score>=9?"Buona qualità tecnica stimata":
-            score>=7?"Scatto utilizzabile, con margini di miglioramento":
-            score>=5?"Scatto da rivedere tecnicamente":"Problemi tecnici evidenti nella scena";
+        String verdict="Giudizio fotografico non disponibile: la sola analisi "+
+            "di luce e contorni non riconosce il contenuto della fotografia. "+
+            "Per una valutazione semantica avvia QWEN-VL.";
         return new PhotoReview(bitmap,m,score,verdict,reasons,actions,contrast,crop,look);
     }
     /** Gradient-energy saliency, computed on a subsampled image; no semantic subject guarantee. */
@@ -95,12 +98,12 @@ public final class PhotoReview {
         return Bitmap.createBitmap(src,left,top,right-left,bottom-top);
     }
     public static String compare(PhotoReview initial,PhotoReview edited) {
-        int delta=edited.score10-initial.score10;
-        String d=delta>0?"+"+delta:String.valueOf(delta);
-        return "Originale "+initial.score10+"/10  →  proposta "+edited.score10+"/10 ("+d+"). "
-           +(delta>0?"L'algoritmo rileva un miglioramento dei parametri tecnici. ":
-             delta<0?"L'elaborazione peggiora alcuni parametri tecnici; valuta la versione originale. ":
-             "Il punteggio tecnico resta simile. ")
-           +"Non è una misura oggettiva della bellezza della fotografia.";
+        int delta=edited.metrics.score-initial.metrics.score;
+        return "Indice tecnico (luce/dettaglio) originale "+initial.metrics.score+
+            "/100, elaborazione "+edited.metrics.score+"/100 ("+
+            (delta>=0?"+":"")+delta+"). "+
+            "Questo NON misura soggetto, intenzione, coerenza visiva o bellezza. "+
+            "Nessuna elaborazione è automaticamente migliore artisticamente: "+
+            "per valutarla serve un'analisi IA visiva di entrambe le immagini.";
     }
 }
