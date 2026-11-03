@@ -92,6 +92,7 @@ public final class EditorActivity extends Activity {
     private Button qwenReviewButton;
     private QwenModelManager qwenModels;
     private Button qwenDownloadButton,qwenStopButton,qwenQuickButton,qwenCompareButton;
+    private android.widget.ProgressBar qwenSpinner;
     private Button autoLevelToggle,autoLevelManualButton;
     private boolean autoLevelOnOpen=true;
     private AutoLevel.Result lastAutoLevel;
