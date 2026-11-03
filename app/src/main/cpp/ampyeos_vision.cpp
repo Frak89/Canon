@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <sys/stat.h>
 #include <algorithm>
 #include <mutex>
 #include <stdexcept>
@@ -124,11 +125,28 @@ std::string token_to_utf8(const llama_vocab* vocabulary,llama_token token){
     return std::string(text.data(),static_cast<size_t>(count));
 }
 
+struct FileStamp {
+    uint64_t dev=0, ino=0, size=0;
+    bool operator==(const FileStamp& other) const {
+        return dev==other.dev && ino==other.ino && size==other.size;
+    }
+};
+FileStamp file_stamp(const std::string& path) {
+    struct stat st{};
+    if(stat(path.c_str(),&st)!=0 || st.st_size<1)
+        throw std::runtime_error("Qwen model descriptor is invalid or no longer readable");
+    return FileStamp{static_cast<uint64_t>(st.st_dev),
+                     static_cast<uint64_t>(st.st_ino),
+                     static_cast<uint64_t>(st.st_size)};
+}
 struct Session {
     llama_model* model=nullptr;
     llama_context* context=nullptr;
     mtmd_context* vision=nullptr;
     common_chat_templates_ptr chat;
+    RunDeadline deadline{};
+    FileStamp languageStamp{},visionStamp{};
+    bool gpu=false;
     ~Session(){
         chat.reset();
         if(vision)mtmd_free(vision);
@@ -136,6 +154,62 @@ struct Session {
         if(model)llama_model_free(model);
     }
 };
+// Loading the model on EVERY photo was needlessly expensive. Keep it resident
+// while AmpyEOS is alive, resetting the KV cache for independent analyses.
+std::unique_ptr<Session> cached;
+
+std::unique_ptr<Session> load_session(
+    JNIEnv* env,jobject listener,const std::string& modelPath,
+    const std::string& projectorPath,const FileStamp& language,
+    const FileStamp& visionStamp,bool gpu,int seconds) {
+
+    auto session=std::make_unique<Session>();
+    session->gpu=gpu;
+    session->languageStamp=language;
+    session->visionStamp=visionStamp;
+    session->deadline.until=std::chrono::steady_clock::now()+std::chrono::seconds(seconds);
+    session->deadline.visited=0;
+    const std::string backend=gpu?"Vulkan GPU Mali (accelerazione)":"CPU (fallback)";
+    const std::string loading="Caricamento Qwen3-VL · "+backend;
+    stage(env,listener,loading.c_str());
+    auto params=llama_model_default_params();
+    params.n_gpu_layers=gpu?99:0;
+    session->model=llama_model_load_from_file(modelPath.c_str(),params);
+    if(!session->model)
+        throw std::runtime_error("Impossibile caricare il modello "+backend+
+                                 "; controlla memoria e formato GGUF");
+
+    auto cp=llama_context_default_params();
+    cp.n_ctx=4096;
+    cp.n_batch=512;
+    cp.n_ubatch=256;
+    cp.n_threads=4;
+    cp.n_threads_batch=4;
+    cp.abort_callback=abort_cpu;
+    cp.abort_callback_data=&session->deadline;
+    stage(env,listener,"Creo il contesto Qwen per l'inferenza");
+    session->context=llama_init_from_model(session->model,cp);
+    if(!session->context)
+        throw std::runtime_error("Memoria insufficiente per inizializzare Qwen");
+
+    auto mp=mtmd_context_params_default();
+    mp.use_gpu=gpu;
+    mp.n_threads=4;
+    mp.warmup=false;
+    // Preserve model-native image resolution. No forced 224/320 pixel preview
+    // and no reduced vision-token cap: the user's photo retains its detail.
+    mp.cb_eval=observe_vision;
+    mp.cb_eval_user_data=&session->deadline;
+    stage(env,listener,"Inizializzo il proiettore visivo "+backend);
+    session->vision=mtmd_init_from_file(projectorPath.c_str(),session->model,mp);
+    if(!session->vision || !mtmd_support_vision(session->vision))
+        throw std::runtime_error("Proiettore Qwen-VL incompatibile con il modello");
+
+    session->chat=common_chat_templates_init(session->model,"");
+    if(!session->chat)
+        throw std::runtime_error("Template Qwen non disponibile");
+    return session;
+}
 } // namespace
 
 extern "C" JNIEXPORT void JNICALL
@@ -151,12 +225,10 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
     std::lock_guard<std::mutex> guard(inference_lock);
     stop_requested=false;
     try {
-        if(maxImageTokens<16||maxImageTokens>512||budgetSeconds<20||budgetSeconds>300)
-            throw std::runtime_error("Profilo di inferenza fuori limiti");
-        RunDeadline deadline{
-            std::chrono::steady_clock::now() +
-            std::chrono::seconds(budgetSeconds)
-        };
+        // maxImageTokens is reserved for ABI compatibility; zero means
+        // preserving the default full-resolution vision pipeline.
+        if(budgetSeconds<20||budgetSeconds>600)
+            throw std::runtime_error("Tempo massimo di inferenza non valido");
         stage(env,listener,"Inizializzazione motore llama.cpp");
         std::call_once(initialization, [](){
             llama_backend_init();
@@ -171,49 +243,44 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
             throw std::runtime_error("Requested token count outside safety limits");
 
         stop_check();
-        stage(env,listener,"Caricamento modello Qwen 2B dalla memoria");
-        Session session;
-        auto params=llama_model_default_params();
-        params.n_gpu_layers=0;
-        session.model=llama_model_load_from_file(modelPath.c_str(),params);
-        if(!session.model)
-            throw std::runtime_error("Cannot load Qwen GGUF. Check model RAM/size.");
-        stop_check();
-        stage(env,listener,"Allocazione memoria e contesto Qwen");
-
-        auto contextParams=llama_context_default_params();
-        contextParams.n_ctx=2048;
-        contextParams.n_batch=256;
-        contextParams.n_ubatch=256;
-        contextParams.abort_callback=abort_cpu;
-        contextParams.abort_callback_data=&deadline;
-        contextParams.n_threads=4;
-        contextParams.n_threads_batch=4;
-        session.context=llama_init_from_model(session.model,contextParams);
-        if(!session.context)
-            throw std::runtime_error("Cannot allocate Qwen context on this phone.");
-        stop_check();
-        stage(env,listener,"Caricamento proiettore visivo mmproj");
-
-        auto imageParams=mtmd_context_params_default();
-        imageParams.use_gpu=false;
-        imageParams.n_threads=4;
-        imageParams.warmup=false;
-        // Qwen3-VL supports variable-resolution visual inputs.
-        // Default model metadata can request many more patches than needed.
-        imageParams.image_min_tokens=16;
-        imageParams.image_max_tokens=maxImageTokens;
-        imageParams.cb_eval=observe_vision;
-        imageParams.cb_eval_user_data=&deadline;
-        session.vision=mtmd_init_from_file(projectorPath.c_str(),session.model,imageParams);
-        if(!session.vision||!mtmd_support_vision(session.vision))
-            throw std::runtime_error("The image projector is missing or incompatible.");
+        const FileStamp language=file_stamp(modelPath);
+        const FileStamp projection=file_stamp(projectorPath);
+        bool cacheHit=cached && cached->languageStamp==language &&
+            cached->visionStamp==projection;
+        if(!cacheHit) {
+            cached.reset();
+            const bool gpuAvailable=
+                ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU)!=nullptr;
+            if(gpuAvailable) {
+                try {
+                    cached=load_session(env,listener,modelPath,projectorPath,
+                        language,projection,true,budgetSeconds);
+                }catch(const std::exception& gpuError){
+                    __android_log_print(ANDROID_LOG_WARN,"AmpyEOS-Qwen",
+                        "Vulkan GPU unavailable: %s; CPU fallback",gpuError.what());
+                    cached.reset();
+                    stage(env,listener,"Vulkan non inizializzato: fallback CPU");
+                }
+            }
+            if(!cached)
+                cached=load_session(env,listener,modelPath,projectorPath,
+                    language,projection,false,budgetSeconds);
+        }else {
+            stage(env,listener,"Modello e proiettore già caricati in RAM: riutilizzo");
+        }
+        Session& session=*cached;
+        session.deadline.until=std::chrono::steady_clock::now()+
+            std::chrono::seconds(budgetSeconds);
+        session.deadline.visited=0;
+        llama_memory_clear(llama_get_memory(session.context),true);
+        // Reassign the native callback's pointer to a LIVE cached deadline.
+        llama_set_abort_callback(session.context,abort_cpu,&session.deadline);
+        RunDeadline& deadline=session.deadline;
+        const std::string activeBackend=session.gpu?
+            "GPU Vulkan · foto con dettaglio originale":"CPU · foto con dettaglio originale";
+        stage(env,listener,activeBackend.c_str());
         stop_check();
         stage(env,listener,"Preparazione immagine e istruzioni fotografiche");
-
-        session.chat=common_chat_templates_init(session.model,"");
-        if(!session.chat)
-            throw std::runtime_error("The GGUF has no compatible chat template.");
 
         mtmd::bitmap image(width,height,rgb.data());
         if(!image.ptr)
@@ -242,9 +309,11 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
         if(!chunks||mtmd_tokenize_from_parts(session.vision,chunks.get(),inputs,3,true)!=0)
             throw std::runtime_error("Vision tokens could not be produced.");
         stop_check();
-        const std::string stageMessage="Encoder Qwen CPU: max "+
-            std::to_string(maxImageTokens)+" token visivi, limite "+
-            std::to_string(budgetSeconds)+"s";
+        const std::string stageMessage=(session.gpu?
+            "Encoder visivo Vulkan GPU":"Encoder visivo CPU")+
+            std::string(" · risoluzione originale ")+
+            std::to_string(width)+"x"+std::to_string(height)+
+            " · controllo timeout "+std::to_string(budgetSeconds)+"s";
         stage(env,listener,stageMessage.c_str());
 
         llama_pos next=0;
