@@ -7,7 +7,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * JNI bridge into llama.cpp + libmtmd, in the AmpyEOS app process.
  * NO socket, HTTP API, Termux, external service, or photo upload.
  *
- * The 1.55GB model files are user-downloaded to app-private storage.
+ * Models are persisted in public Download/AmpyEOS/Qwen3-VL and opened through
+ * scoped-storage descriptors, retained until the synchronous native call ends.
  */
 public final class NativeQwenVision {
     private static final boolean LOADED;
@@ -65,8 +66,13 @@ public final class NativeQwenVision {
             int w=small.getWidth(),h=small.getHeight();
             int[] pixels=new int[w*h];
             small.getPixels(pixels,0,w,0,0,w,h);
-            return process(models.modelFile().getAbsolutePath(),
-                models.projectorFile().getAbsolutePath(),pixels,w,h,prompt,tokens,progress);
+            // Scoped-storage descriptors stay open throughout native loading,
+            // allowing llama.cpp to mmap the actual GGUF in public Download.
+            // No second 1.55GB private copy is required.
+            try(QwenPersistentStore.OpenModels open=models.openForInference()){
+                return process(open.languagePath(),open.projectorPath(),
+                    pixels,w,h,prompt,tokens,progress);
+            }
         }finally{
             if(small!=image)small.recycle();
         }
