@@ -659,6 +659,11 @@ public final class EditorActivity extends Activity {
         });
     }
     private Bitmap decode(Uri uri)throws Exception{
+        // UI/photo-list preview only; full-resolution pixels are available
+        // separately for original-photo Qwen analysis on the vision worker.
+        return decode(uri,2300);
+    }
+    private Bitmap decode(Uri uri,int previewMaxEdge)throws Exception{
         BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;
         try(InputStream stream=getContentResolver().openInputStream(uri)){
             if(stream==null)throw new Exception("File non accessibile");
@@ -666,7 +671,14 @@ public final class EditorActivity extends Activity {
         }
         if(bounds.outWidth<=0||bounds.outHeight<=0)throw new Exception("Formato non decodificabile: prova JPG/PNG");
         BitmapFactory.Options opt=new BitmapFactory.Options();
-        int sample=1;while(Math.max(bounds.outWidth,bounds.outHeight)/sample>2300)sample*=2;
+        long pixelCount=(long)bounds.outWidth*bounds.outHeight;
+        if(previewMaxEdge<=0 && pixelCount>32_000_000L)
+            throw new Exception("Foto oltre 32 MP: serve gestione avanzata dei tile, "+
+                "non verrà ridotta automaticamente.");
+        int sample=1;
+        if(previewMaxEdge>0)
+            while(Math.max(bounds.outWidth,bounds.outHeight)/sample>previewMaxEdge)
+                sample*=2;
         opt.inSampleSize=sample;opt.inPreferredConfig=Bitmap.Config.ARGB_8888;
         Bitmap bitmap;
         try(InputStream stream=getContentResolver().openInputStream(uri)){
