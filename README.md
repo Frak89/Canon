@@ -1,4 +1,4 @@
-# AmpyEOS 0.8.3 — Full Quality / Vulkan GPU / Qwen residente
+# AmpyEOS 0.8.4 — Qwen Offline · Download permanente in background
 
 App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
 
@@ -14,6 +14,19 @@ App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
 **Guida tecnica e test hardware:** [docs/AmpyEOS_Rev083_GPU_FullQuality.md](docs/AmpyEOS_Rev083_GPU_FullQuality.md)
 
 **Limite importante:** la bitmap di lavoro caricata inizialmente dall'editor viene ancora campionata per l'interfaccia. La v0.8.3 elimina la *seconda* riduzione dentro Qwen, ma non rappresenta ancora una pipeline completa per elaborare o esportare i RAW Canon alla risoluzione nativa. Inoltre la qualità e velocità GPU devono essere misurate sul Pixel fisico, non inferite dalla compilazione.
+
+## Novità v0.8.4 · Modelli Qwen realmente scaricabili e caricabili
+
+- **Foreground Service Android**: Qwen3-VL viene scaricato tramite un servizio dataSync con notifica persistente, non dentro la schermata EditorActivity. Si può passare ad altre app o spegnere lo schermo; l'operazione continua nei limiti del sistema Android (quota FGS dataSync, batteria e kill espliciti).
+- **Modelli visibili nella cartella Download/AmpyEOS/Qwen3-VL** tramite MediaStore, non dentro la cache privata di AmpyEOS. I file incompleti hanno estensione ".gguf.part" e possono riprendere via HTTP Range. File verificati con SHA-256 ufficiale prima di essere dichiarati pronti.
+- **FILE QWEN IN DOWNLOAD** mostra file finali e parziali, dimensioni reali e possibili problemi di accesso.
+- **TEST CARICAMENTO QWEN** apre davvero i due descrittori Android e verifica che siano GGUF corretti, di dimensioni attese e utilizzabili da llama.cpp (accesso casuale). Non simula una risposta dell'IA.
+- **Notifiche Android**: stato del download e pulsante per sospenderlo anche fuori dall'app; l'editor si aggiorna al termine del trasferimento, senza imporre un altro download.
+- Le fotografie non vengono inviate online e la risoluzione originale del percorso Qwen approfondito non viene ridotta da questa revisione.
+
+**Guida dettagliata e prove sul Pixel:** [docs/AmpyEOS_Rev084_Background_Download.md](docs/AmpyEOS_Rev084_Background_Download.md).
+
+**Stato:** la compilazione GitHub dimostra che l'APK viene generata, ma il trasferimento in background e il caricamento nativo sul Pixel reale richiedono prova sul dispositivo.
 
 ## Novità v0.8.2 · Risposta rapida senza 20 minuti di attesa
 
