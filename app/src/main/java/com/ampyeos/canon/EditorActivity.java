@@ -222,7 +222,10 @@ public final class EditorActivity extends Activity {
         if(qwenCompareButton!=null)qwenCompareButton.setEnabled(ready&&modelReady&&!qwenAnalyzing);
         if(qwenDownloadButton!=null){
             qwenDownloadButton.setEnabled(!modelReady&&!qwenModels.isWorking());
-            qwenDownloadButton.setText(modelReady?"QWEN GIÀ SALVATO IN DOWNLOAD":
+            qwenDownloadButton.setText(modelReady?
+                (qwenModels.isPersistent()?
+                    "QWEN GIÀ SALVATO IN DOWNLOAD":
+                    "QWEN NELLA VECCHIA CACHE · SALVALO"):
                 "SCARICA QWEN SOLO SE MANCA");
         }
         if(qwenStopButton!=null)qwenStopButton.setEnabled(qwenAnalyzing&&!qwenStopRequested);
