@@ -216,9 +216,15 @@ public final class EditorActivity extends Activity {
         if(overlayButton!=null)AmpyButtons.setToggle(overlayButton,showVisual);
         if(playButton!=null)AmpyButtons.setToggle(playButton,playing);
         if(autoLessonButton!=null)AmpyButtons.setToggle(autoLessonButton,autoLesson);
-        if(qwenReviewButton!=null)qwenReviewButton.setEnabled(ready&&!qwenAnalyzing);
-        if(qwenQuickButton!=null)qwenQuickButton.setEnabled(ready&&!qwenAnalyzing);
-        if(qwenCompareButton!=null)qwenCompareButton.setEnabled(ready&&!qwenAnalyzing);
+        boolean modelReady=qwenModels!=null&&qwenModels.isReady();
+        if(qwenReviewButton!=null)qwenReviewButton.setEnabled(ready&&modelReady&&!qwenAnalyzing);
+        if(qwenQuickButton!=null)qwenQuickButton.setEnabled(ready&&modelReady&&!qwenAnalyzing);
+        if(qwenCompareButton!=null)qwenCompareButton.setEnabled(ready&&modelReady&&!qwenAnalyzing);
+        if(qwenDownloadButton!=null){
+            qwenDownloadButton.setEnabled(!modelReady&&!qwenModels.isWorking());
+            qwenDownloadButton.setText(modelReady?"QWEN GIÀ SALVATO IN DOWNLOAD":
+                "SCARICA QWEN SOLO SE MANCA");
+        }
         if(qwenStopButton!=null)qwenStopButton.setEnabled(qwenAnalyzing&&!qwenStopRequested);
     }
     private LinearLayout row(LinearLayout container){
@@ -447,7 +453,7 @@ public final class EditorActivity extends Activity {
 
         // 07. Infrequent setup actions are grouped at the very bottom.
         LinearLayout modelsSection=section(panel,"07  MODELLI IA · DOWNLOAD & ARCHIVIO",false);
-        qwenDownloadButton=gridAction("SCARICA QWEN3-VL 2B (1,55 GB)",
+        qwenDownloadButton=gridAction("SCARICA QWEN SOLO SE MANCA",
             paired(modelsSection),v->downloadQwen());
         LinearLayout downloadPair=paired(modelsSection);
         gridAction("IMPORTA GGUF DA DOWNLOAD",downloadPair,v->pickQwen());
@@ -492,6 +498,19 @@ public final class EditorActivity extends Activity {
                 .setPositiveButton("OK",null).show());
         stillSubject=new SubjectAi();
         updateButtonAvailability();
+        // Run on a worker: hashing 1.55GB must never block the editor.
+        visionStatus.setText("QWEN · Cerco modelli in Download/AmpyEOS/Qwen3-VL…");
+        qwenModels.prepare(new QwenModelManager.Listener(){
+            @Override public void onProgress(String message,long bytes,long total){
+                if(!closing)visionStatus.setText("QWEN · "+message);
+            }
+            @Override public void onComplete(boolean success,String message){
+                if(closing)return;
+                visionStatus.setText("QWEN · "+message);
+                visionDiagnostics.add("Ricerca Qwen: "+(success?"eseguita":"non riuscita"));
+                updateButtonAvailability();
+            }
+        });
         speech=new TextToSpeech(this,code->{if(code==TextToSpeech.SUCCESS && speech!=null){
             speech.setLanguage(Locale.ITALIAN);speech.setSpeechRate(.92f);
         }});
@@ -1117,11 +1136,12 @@ public final class EditorActivity extends Activity {
     private void pickQwen(){
         new AlertDialog.Builder(this)
             .setTitle("Importa Qwen3-VL offline")
-            .setMessage("Se hai già scaricato i modelli nella cartella Download, "+
-                "scegli prima il GGUF Q4_K_M (1,11 GB) e poi ripeti per il "+
-                "proiettore mmproj Q8_0 (445 MB). "+
-                "Ogni file viene verificato con SHA-256. Nessuna fotografia "+
-                "verrà inviata fuori dal Pixel.")
+            .setMessage("Apri Download/AmpyEOS/Qwen3-VL e seleziona il GGUF "+
+                "Q4_K_M, poi ripeti con mmproj Q8_0. Su Android questa operazione "+
+                "può essere necessaria dopo una disinstallazione. "+
+                "AmpyEOS conserva il permesso di lettura per i successivi avvii. "+
+                "Il file viene VERIFICATO senza essere copiato o riscaricato. "+
+                "Nessuna foto viene inviata fuori dal Pixel.")
             .setPositiveButton("SCEGLI FILE",(d,w)->{
                 Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);
                 i.addCategory(Intent.CATEGORY_OPENABLE);
@@ -1137,25 +1157,32 @@ public final class EditorActivity extends Activity {
                 if(!closing)visionStatus.setText("Qwen3-VL · "+message);
             }
             @Override public void onComplete(boolean success,String message){
-                if(!closing)visionStatus.setText("Qwen3-VL · "+message);
+                if(closing)return;
+                visionStatus.setText("Qwen3-VL · "+message);
+                updateButtonAvailability();
             }
         });
     }
 
     private void downloadQwen(){
         if(qwenModels==null)return;
+        if(qwenModels.isReady()){
+            visionStatus.setText("QWEN · Già presente in Download/AmpyEOS/Qwen3-VL. "+
+                "Nessun nuovo download necessario.");
+            return;
+        }
         new AlertDialog.Builder(this)
-            .setTitle("Qwen3-VL 2B · Modello fotografico sul Pixel")
-            .setMessage("Scarico da Hugging Face i GGUF ufficiali Q4_K_M e mmproj Q8_0 "+
-                "(circa 1,55 GB). Puoi usare Wi-Fi o 4G/5G, ma sulla rete mobile "+
-                "consumerai traffico dati. È possibile riprendere il trasferimento "+
-                "se si interrompe. I due file saranno verificati con SHA-256 "+
-                "prima dell'uso. NON vengono caricate fotografie sulla rete. "+
-                "Il motore llama.cpp è integrato nell'app, non serve Termux.")
+            .setTitle("Qwen3-VL 2B · Solo i file mancanti")
+            .setMessage("AmpyEOS cerca prima i GGUF in Download/AmpyEOS/Qwen3-VL. "+
+                "Scaricherà soltanto i file assenti, salvandoli lì in modo persistente "+
+                "anche dopo la disinstallazione. Dimensione massima complessiva: "+
+                "circa 1,55 GB. Puoi utilizzare Wi-Fi o 4G/5G: su rete mobile "+
+                "consumerai traffico dati. Il download interrotto potrà riprendere. "+
+                "SHA-256 verificato prima dell'uso. Le foto non sono inviate in rete.")
             .setNegativeButton("ANNULLA",null)
             .setPositiveButton("SCARICA SUL PIXEL",(dialog,which)->{
                 qwenDownloadButton.setEnabled(false);
-                visionStatus.setText("Qwen3-VL · Download sul telefono in corso…");
+                visionStatus.setText("Qwen3-VL · Download nella cartella Download/AmpyEOS/Qwen3-VL…");
                 qwenModels.download(new QwenModelManager.Listener(){
                     @Override public void onProgress(String message,long current,long total){
                         if(!closing)visionStatus.setText("QWEN3-VL · "+message);
@@ -1163,7 +1190,6 @@ public final class EditorActivity extends Activity {
                     @Override public void onComplete(boolean success,String message){
                         if(closing)return;
                         visionStatus.setText("QWEN3-VL · "+message);
-                        qwenDownloadButton.setEnabled(true);
                         updateButtonAvailability();
                     }
                 });
@@ -1195,7 +1221,9 @@ public final class EditorActivity extends Activity {
         if(source==null){visionStatus.setText("Apri una fotografia prima di analizzarla.");return;}
         if(qwenAnalyzing){visionStatus.setText("Qwen è già impegnato.");return;}
         if(qwenModels==null||!qwenModels.isReady()){
-            visionStatus.setText("QWEN · Pesature non presenti; premi SCARICA QWEN.");
+            visionStatus.setText("QWEN · Modelli non verificati. "+
+                "Apri MODELLI IA: scegli i GGUF già presenti in Download. "+
+                "Scarica soltanto quelli mancanti.");
             return;
         }
         if(!NativeQwenVision.available()){
