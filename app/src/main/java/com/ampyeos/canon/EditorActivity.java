@@ -56,7 +56,7 @@ public final class EditorActivity extends Activity {
     private final ExecutorService fastWorker=Executors.newSingleThreadExecutor();
     private volatile boolean fastBusy=false;
     private final AtomicInteger generation=new AtomicInteger();
-    private Bitmap original, working, display;
+    private Bitmap original, working, display, initialWorking;
     private Uri originUri;
     private ImageView image;
     private CropView crop;
@@ -737,7 +737,7 @@ public final class EditorActivity extends Activity {
                     learnedStatus.setText("MUSIQ · "+LearnedQuality.status(this)+
                         " · premi VALUTA QUALITÀ MUSIQ per calcolare la qualità percettiva");
                     visionStatus.setText("QWEN-VL · Foto caricata; in attesa di analisi semantica.");
-                    original=b;working=leveled;originalReview=r;inspection=visual;
+                    original=b;working=leveled;initialWorking=leveled;originalReview=r;inspection=visual;
                     lastAutoLevel=alignment;
                     updateButtonAvailability();
                     image.setImageBitmap(leveled);
@@ -1353,20 +1353,31 @@ public final class EditorActivity extends Activity {
         // A watchdog prevents indefinite failures, but does not reduce pixel
         // resolution, image tokens, scene detail or output quality.
         final int timeBudget=180;
+        final Uri inputDocument=originUri;
+        final boolean pristine=!compare&&inputDocument!=null&&
+            (working==original||working==initialWorking)&&
+            selectedLook==ColorLooks.Look.NATURALE&&
+            brightness!=null&&brightness.getProgress()==100&&
+            contrast!=null&&contrast.getProgress()==100&&
+            saturation!=null&&saturation.getProgress()==100;
+        final AutoLevel.Result level=lastAutoLevel;
+        final boolean recreateInitialLevel=pristine&&working==initialWorking&&
+            working!=original&&level!=null&&level.applied;
         qwenStopRequested=false;
         qwenDeadlineIssued=false;
         qwenMaxSeconds=timeBudget;
         qwenAnalyzing=true;
         qwenStage="In coda · "+mode;
         qwenStartElapsed=android.os.SystemClock.elapsedRealtime();
-        visionDiagnostics.add("Avvio "+mode+" · "+edge+"px, "+tokenLimit+" token · "+
-            visionDiagnostics.memory());
+        visionDiagnostics.add("Avvio "+mode+" · risoluzione senza limiti aggiuntivi · "+
+            tokenLimit+" token · "+visionDiagnostics.memory());
         updateButtonAvailability();
         ui.removeCallbacks(qwenTicker);
         qwenTicker.run();
 
         visionWorker.execute(()->{
             Bitmap composite=null;
+            Bitmap fullResolution=null;
             try{
                 if(qwenStopRequested)
                     throw new IllegalStateException("Operazione annullata prima dell'avvio");
@@ -1375,10 +1386,27 @@ public final class EditorActivity extends Activity {
                         throw new IllegalStateException("Nessuna versione elaborata disponibile");
                     composite=VisionComparison.arrange(source,proposal);
                 }
-                // The normal critic judges exactly what is shown in the editor,
-                // including any reversible auto-level correction or look.
+                // For an untouched photo, decode the ORIGINAL DOCUMENT at
+                // full resolution exclusively on this worker. The UI preview
+                // remains lightweight, yet Qwen receives all source pixels.
+                // For edited images, the actual working copy is used; no
+                // silent claim that a 2300px edit is a 24MP original.
+                if(pristine){
+                    visionDiagnostics.add("Decodifico originale senza campionamento");
+                    fullResolution=decode(inputDocument,0);
+                    if(recreateInitialLevel){
+                        Bitmap corrected=AutoLevel.corrected(fullResolution,level);
+                        if(corrected!=fullResolution){
+                            fullResolution.recycle();
+                            fullResolution=corrected;
+                        }
+                    }
+                }
                 Bitmap taskBitmap=compare?composite:
-                    (proposal!=null?proposal:source);
+                    (fullResolution!=null?fullResolution:
+                        proposal!=null?proposal:source);
+                visionDiagnostics.add("Pixel effettivi all'IA: "+
+                    taskBitmap.getWidth()+"x"+taskBitmap.getHeight());
                 String prompt=compare?VisionComparison.prompt():
                     quick?LocalVisionReviewer.fastPrompt():
                         LocalVisionReviewer.offlinePrompt();
@@ -1448,6 +1476,7 @@ public final class EditorActivity extends Activity {
                 });
             }finally{
                 if(composite!=null)composite.recycle();
+                if(fullResolution!=null)fullResolution.recycle();
                 ui.post(()->{
                     if(closing)return;
                     qwenAnalyzing=false;
