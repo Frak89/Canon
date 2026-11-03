@@ -11,8 +11,8 @@ android {
         externalNativeBuild {
             cmake { cppFlags += listOf("-O2", "-std=c++17") }
         }
-        versionCode = 12
-        versionName = "0.7.1"
+        versionCode = 13
+        versionName = "0.8.0"
     }
     buildTypes {
         release { isMinifyEnabled = false }
