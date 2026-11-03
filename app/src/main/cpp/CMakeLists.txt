@@ -54,4 +54,4 @@ target_include_directories(ampyeos-vision PRIVATE
     "${LLAMA_SRC}/ggml/include"
     "${LLAMA_SRC}/tools/mtmd"
 )
-target_link_libraries(ampyeos-vision PRIVATE llama llama-common mtmd android log)
+target_link_libraries(ampyeos-vision PRIVATE llama llama-common mtmd ggml-vulkan android log)
