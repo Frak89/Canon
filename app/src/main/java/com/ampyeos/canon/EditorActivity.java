@@ -349,7 +349,7 @@ public final class EditorActivity extends Activity {
         LinearLayout analysisPair=paired(aiSection);
         qwenQuickButton=gridPhoto("ANALISI RAPIDA LOCALE",analysisPair,
             v->analyzeFastLocal());
-        qwenReviewButton=gridPhoto("QWEN PROFONDO · MAX 180s",analysisPair,
+        qwenReviewButton=gridPhoto("QWEN PROFONDO · MAX 60s",analysisPair,
             v->analyzeVision());
         LinearLayout comparePair=paired(aiSection);
         qwenCompareButton=gridPhoto("CONFRONTA ORIGINALE / EDIT",comparePair,
@@ -1250,6 +1250,59 @@ public final class EditorActivity extends Activity {
             .setNegativeButton("CHIUDI",null).show();
     }
 
+    /**
+     * No VLM startup: fast and verifiable technical/ML Kit review.
+     * The single-image Qwen3-VL vision encoder is CPU-only on Tensor G2
+     * and can take minutes, so it must never block the default action.
+     */
+    private void analyzeFastLocal(){
+        final Bitmap imageToCheck=display!=null?display:working;
+        final Bitmap source=original;
+        if(imageToCheck==null||source==null){
+            visionStatus.setText("Apri prima una fotografia.");return;
+        }
+        if(fastBusy){
+            visionStatus.setText("Analisi rapida già in corso.");return;
+        }
+        if(qwenAnalyzing){
+            visionStatus.setText("Premi FERMA ANALISI QWEN prima di avviare "+
+                "la modalità rapida: la CPU è occupata.");
+            return;
+        }
+        fastBusy=true;
+        updateButtonAvailability();
+        visionStatus.setText("ANALISI RAPIDA LOCALE · ML Kit e dati fotografici, "+
+            "senza caricamento di Qwen…");
+        fastWorker.execute(()->{
+            try{
+                final String hypothesis=subjectDescription;
+                final LearnedQuality.Result musiq=learnedResult;
+                FastPhotoAssistant.Result result=FastPhotoAssistant.inspect(
+                    imageToCheck,hypothesis,musiq);
+                ui.post(()->{
+                    if(closing||original!=source)return;
+                    report.setText(result.explanation);
+                    openSection(resultsSection,true);
+                    caption.setText("Analisi rapida locale completata · "+
+                        "nessun voto artistico inventato");
+                    visionStatus.setText("ANALISI RAPIDA LOCALE · Completata "+
+                        "senza caricare Qwen e senza inviare fotografie");
+                    teacher.setText("MAESTRO TECNICO · "+result.explanation);
+                    if(voice)say(result.speech);
+                });
+            }catch(Exception e){
+                ui.post(()->{
+                    if(!closing&&original==source)visionStatus.setText(
+                        "Analisi rapida: "+e.getMessage());
+                });
+            }finally{
+                ui.post(()->{
+                    if(!closing){fastBusy=false;updateButtonAvailability();}
+                });
+            }
+        });
+    }
+
     private void startQwen(boolean quick,boolean compare) {
         final Bitmap source=original;
         final Bitmap proposal=(display!=null?display:working);
@@ -1283,7 +1336,7 @@ public final class EditorActivity extends Activity {
         // substantially lower than the original 640/768px no-limit version.
         final int edge=compare?384:quick?224:320;
         final int tokenLimit=compare?650:quick?500:880;
-        final int timeBudget=compare?180:quick?90:180;
+        final int timeBudget=60; // Native CPU timeout; no 20-minute analysis.
         qwenStopRequested=false;
         qwenDeadlineIssued=false;
         qwenMaxSeconds=timeBudget;
