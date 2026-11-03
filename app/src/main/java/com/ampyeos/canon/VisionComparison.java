@@ -61,27 +61,40 @@ public final class VisionComparison {
         return new Result(json);
     }
     public static Bitmap arrange(Bitmap original,Bitmap edited){
-        int w=1440,h=720;
-        Bitmap image=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
-        Canvas c=new Canvas(image);c.drawColor(Color.rgb(10,15,22));
+        if(original==null||edited==null)
+            throw new IllegalArgumentException("Servono originale e proposta");
+        // No automatic 720p or 1440px shrinking: each side of the comparison
+        // retains the working bitmap's detail. The original file stays intact.
+        int panelW=Math.max(original.getWidth(),edited.getWidth());
+        int panelH=Math.max(original.getHeight(),edited.getHeight());
+        final int footer=64;
+        long width=(long)panelW*2;
+        long height=(long)panelH+footer;
+        if(width>8192||height>8192||width*height>32_000_000L)
+            throw new IllegalArgumentException(
+                "Confronto troppo grande per memoria Android: "+
+                panelW+"x"+panelH+" per lato. Nessuna foto viene ridotta di nascosto.");
+        int w=(int)width,h=(int)height;
+        Bitmap result=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
+        Canvas c=new Canvas(result);c.drawColor(Color.rgb(10,15,22));
         Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
-        place(c,p,original,0,0,720,660);
-        place(c,p,edited,720,0,1440,660);
+        place(c,p,original,0,0,panelW,panelH);
+        place(c,p,edited,panelW,0,w,panelH);
         p.setColor(0xffb9ffe9);
         p.setTextSize(28);p.setFakeBoldText(true);
-        c.drawText("ORIGINALE",24,704,p);
-        c.drawText("PROPOSTA",744,704,p);
-        p.setColor(0xff86beb8);
-        p.setStrokeWidth(3);c.drawLine(720,0,720,720,p);
-        return image;
+        c.drawText("ORIGINALE",16,h-18,p);
+        c.drawText("PROPOSTA",panelW+16,h-18,p);
+        p.setColor(0xff86beb8);p.setStrokeWidth(3);
+        c.drawLine(panelW,0,panelW,h,p);
+        return result;
     }
     private static void place(Canvas canvas,Paint paint,Bitmap source,
                               float l,float t,float r,float b){
         if(source==null)return;
-        float maxW=r-l-20,maxH=b-t-20;
-        float scale=Math.min(maxW/source.getWidth(),maxH/source.getHeight());
+        float maxW=r-l,maxH=b-t;
+        float scale=Math.min(1f,Math.min(maxW/source.getWidth(),maxH/source.getHeight()));
         float w=source.getWidth()*scale,h=source.getHeight()*scale;
-        float left=l+10+(maxW-w)/2,top=t+10+(maxH-h)/2;
+        float left=l+(maxW-w)/2,top=t+(maxH-h)/2;
         paint.setColor(Color.WHITE);
         canvas.drawBitmap(source,null,new RectF(left,top,left+w,top+h),paint);
     }
