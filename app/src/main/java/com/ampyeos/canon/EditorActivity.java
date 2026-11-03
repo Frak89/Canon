@@ -25,6 +25,7 @@ import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.EditText;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Spinner;
@@ -81,6 +82,10 @@ public final class EditorActivity extends Activity {
     private TextToSpeech speech;
     private int lessonStep=0;
     private PhotoReview originalReview;
+    private LocalVisionReviewer.Result visionResult;
+    private TextView visionStatus;
+    private Button qwenReviewButton;
+    private int visionPort=LocalVisionReviewer.DEFAULT_PORT;
     private ColorLooks.Look selectedLook=ColorLooks.Look.NATURALE;
     private volatile boolean closing=false;
     private final String[] steps={"1 · OSSERVA","2 · LUCE","3 · COMPOSIZIONE","4 · COLORE","5 · CONFRONTA"};
@@ -198,13 +203,20 @@ public final class EditorActivity extends Activity {
                 "Qwen .gguf non è compatibile con questo motore: "+
                 "servirà un runtime Vision-Language separato.")
             .setPositiveButton("OK",null).show());
+        visionPort=getPreferences(MODE_PRIVATE).getInt("vision_port",LocalVisionReviewer.DEFAULT_PORT);
+        visionStatus=txt("QWEN-VL · Non connesso. Il voto artistico richiede un modello visivo reale.",12);
+        visionStatus.setTextColor(0xffefcc98);panel.addView(visionStatus);
+        LinearLayout qwenActions=row(panel);
+        button("CONFIGURA QWEN-VL",qwenActions,v->configureVision());
+        qwenReviewButton=button("ANALIZZA SCENA CON QWEN-VL",qwenActions,v->analyzeVision());
+        qwenReviewButton.setEnabled(false);
         caption=txt("Apri una foto oppure confronta più scatti.",13);caption.setTextColor(CYAN);panel.addView(caption);
         report=txt("L'originale non viene mai sovrascritto.",12);panel.addView(report);
         LinearLayout tools=row(panel);
         button("APRI FOTO",tools,v->pick(false));
-        button("SCEGLI MIGLIORE",tools,v->pick(true));
-        actionPhoto("MASTER AI AUTO",tools,v->autoMaster());
-        actionPhoto("AUTO PRO COMPLETO",tools,v->autoPro());
+        button("ORDINA PER DATI TECNICI",tools,v->pick(true));
+        actionPhoto("AUTO LOOK TECNICO",tools,v->autoMaster());
+        actionPhoto("AUTO TONO + CROP",tools,v->autoPro());
         versionsButton=actionPhoto("VERSIONI AI",tools,v->showVersions());
         versionsButton.setEnabled(false);
         actionPhoto("AUTO COMPONI",tools,v->autoCompose());
@@ -362,8 +374,10 @@ public final class EditorActivity extends Activity {
                 ui.post(()->{
                     if(closing)return;
                     stopAutoLesson();comparison.setVisibility(View.GONE);compareOn=false;
-                    masterSession=null;activePlan=null;
+                    masterSession=null;activePlan=null;visionResult=null;
+                    visionStatus.setText("QWEN-VL · Foto caricata; in attesa di analisi semantica.");
                     original=b;working=b;originalReview=r;inspection=visual;
+                    qwenReviewButton.setEnabled(true);
                     image.setImageBitmap(b); // Show the actual decoded source immediately.
                     if(r.metrics.brightness<14 && r.metrics.detail<8)
                         modelStatus.setText("AVVISO IMMAGINE: i pixel del file risultano quasi neri. "+
@@ -399,7 +413,8 @@ public final class EditorActivity extends Activity {
                     before=false;crop.setBitmapSize(b.getWidth(),b.getHeight());
                     crop.setCropEnabled(false);crop.setAspect(0);
                     lesson.configure(b.getWidth(),b.getHeight(),r.suggestedCrop);
-                    caption.setText("VALUTAZIONE INIZIALE: "+r.score10+"/10 · "+r.verdict);
+                    caption.setText("VALUTAZIONE FOTOGRAFICA: "+r.scoreLabel()+
+                        " · indice tecnico luce/dettaglio "+r.metrics.score+"/100");
                     report.setText("DATI VISIVI: "+visual.summary+
                         "\nPERCHÉ: "+r.why+"\nCOME: "+r.how);
                     refresh();showStep(0);updateButtonAvailability();
@@ -414,7 +429,7 @@ public final class EditorActivity extends Activity {
             for(Uri u:uris){
                 try{
                     Bitmap b=decode(u);PhotoReview review=PhotoReview.inspect(b);
-                    candidates.add(new Candidate(u,review.score10,review.metrics.score,review.verdict,review.why));
+                    candidates.add(new Candidate(u,0,review.metrics.score,review.verdict,review.why));
                     b.recycle();
                 }catch(Exception ignored){}
             }
@@ -427,10 +442,10 @@ public final class EditorActivity extends Activity {
                     Candidate c=candidates.get(i);
                     String name=c.uri.getLastPathSegment();
                     if(name!=null && name.length()>34)name=name.substring(name.length()-34);
-                    entries[i]=(i==0?"★ ":"")+(i+1)+". "+c.score+"/10 · "+name;
+                    entries[i]=(i==0?"▲ ":"")+(i+1)+". indice tecnico "+c.quality+"/100 · "+name;
                 }
-                new AlertDialog.Builder(this).setTitle("Scatti migliori · classifica tecnica")
-                    .setMessage("Il voto valuta l'immagine, non il contenuto artistico. Tocca una foto per vedere perché è stata scelta.")
+                new AlertDialog.Builder(this).setTitle("Ordine per parametri tecnici")
+                    .setMessage("QUESTA NON È UNA CLASSIFICA ARTISTICA: luce e dettaglio non indicano il valore della scena. Tocca una foto per aprirla e usare Qwen-VL.")
                     .setItems(entries,(d,n)->load(candidates.get(n).uri))
                     .setPositiveButton("MIGLIORE",(d,w)->load(candidates.get(0).uri))
                     .setNegativeButton("CHIUDI",null).show();
@@ -535,6 +550,9 @@ public final class EditorActivity extends Activity {
         String info=(inspection!=null?
             inspection.fullReport()+"\n\nSOGGETTO ML KIT: "+subjectDescription+
             "\nSPIEGAZIONE DEL SOGGETTO: "+subjectExplanation+"\n\n":"")+
+            (visionResult!=null?
+             visionResult.narrative()+"\n\n":
+             "VERDETTO ARTISTICO NON DISPONIBILE: avvia ANALIZZA SCENA CON QWEN-VL.\n\n")+
             (masterSession!=null?
              masterSession.verdict+"\n\n"+masterSession.nextShot+"\n\n":
              "")+PhotoReview.compare(originalReview,proposal)
@@ -559,8 +577,10 @@ public final class EditorActivity extends Activity {
         String message;
         switch(lessonStep){
             case 0:
-                message="Osserva l'immagine originale. La prima valutazione è "+r.score10+
-                    " su dieci. "+r.verdict+". "+subjectExplanation+
+                message="Osserva l'immagine originale. "+
+                    (visionResult!=null?visionResult.narrative():
+                        "Non attribuisco alcun voto artistico senza riconoscere la scena. ")+
+                    " "+subjectExplanation+
                     " "+(inspection==null?"":inspection.summary)+". "+r.why;
                 break;
             case 1:
@@ -582,8 +602,12 @@ public final class EditorActivity extends Activity {
                     ". Puoi intervenire manualmente sui controlli. Il gusto personale resta decisivo.";
                 break;
             default:
-                message=masterSession!=null?
-                    "Il mio verdetto finale: "+masterSession.verdict+
+                message=visionResult!=null?
+                    "La mia analisi semantica della fotografia originale: "+
+                    visionResult.narrative()+"; per giudicare la versione elaborata "+
+                    "serve una seconda analisi visiva, non basta il contrasto.":
+                    masterSession!=null?
+                    "Confronto tecnico, non artistico: "+masterSession.verdict+
                     " Per il prossimo scatto, "+masterSession.nextShot+
                     " Usa SPLIT SCORREVOLE per confrontare le due immagini.":
                     "Confronta originale e proposta con SPLIT SCORREVOLE; "+
@@ -620,8 +644,8 @@ public final class EditorActivity extends Activity {
                     crop.setCropEnabled(false);
                     crop.setBitmapSize(output.getWidth(),output.getHeight());
                     lesson.configure(output.getWidth(),output.getHeight(),session.best.plan.rect);
-                    caption.setText("MASTER AI · "+session.best.plan.name+
-                        " · punteggio euristico "+session.best.vote+"/10");
+                    caption.setText("AUTO LOOK · "+session.best.plan.name+
+                        " · indice solo tecnico "+String.format(Locale.ITALIAN,"%.1f",session.best.quality)+"/100");
                     report.setText("VERDETTO\n"+session.verdict+
                         "\n\nMODIFICHE\n"+session.best.plan.changes()+
                         "\n\nPROSSIMO SCATTO\n"+session.nextShot);
@@ -659,7 +683,8 @@ public final class EditorActivity extends Activity {
                     selectedLook=ColorLooks.Look.NATURALE;looks.setSelection(0);
                     brightness.setProgress(100);contrast.setProgress(100);saturation.setProgress(100);
                     crop.setCropEnabled(false);crop.setBitmapSize(output.getWidth(),output.getHeight());
-                    caption.setText("Versione "+c.plan.name+" · voto tecnico stimato "+c.vote+"/10");
+                    caption.setText("Versione "+c.plan.name+" · indice tecnico "+
+                        String.format(Locale.ITALIAN,"%.1f",c.quality)+"/100, non voto artistico");
                     report.setText("PERCHÉ QUESTA VERSIONE\n"+c.rationale+
                         "\n\nMODIFICHE\n"+c.plan.changes());
                     refresh();
@@ -757,6 +782,69 @@ public final class EditorActivity extends Activity {
                     report.setText("AI EXTRA · "+guess+"\n\n"+
                         (inspection==null?"":inspection.summary));
                 }
+            }
+        });
+    }
+
+
+    private void configureVision(){
+        EditText port=new EditText(this);
+        port.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        port.setText(String.valueOf(visionPort));
+        port.setSelectAllOnFocus(true);
+        new AlertDialog.Builder(this)
+            .setTitle("Qwen3-VL · server locale sul Pixel")
+            .setMessage("Inserisci la porta di llama-server avviato sullo STESSO Pixel "+
+                "(ad esempio da Termux). Le foto vengono inviate esclusivamente a "+
+                "127.0.0.1, mai a server esterni. Modello Qwen-VL + mmproj necessari. "+
+                "Il GGUF testuale da solo non legge immagini.")
+            .setView(port)
+            .setPositiveButton("SALVA",(dialog,n)->{
+                try{
+                    int value=Integer.parseInt(port.getText().toString().trim());
+                    if(value<1024||value>65535)throw new NumberFormatException();
+                    visionPort=value;
+                    getPreferences(MODE_PRIVATE).edit().putInt("vision_port",value).apply();
+                    visionStatus.setText("QWEN-VL · Porta locale "+value+
+                        ". Premi ANALIZZA SCENA per verificare il server e la fotografia.");
+                }catch(Exception e){visionStatus.setText(
+                    "Porta non valida: usa un numero compreso tra 1024 e 65535.");}
+            })
+            .setNegativeButton("ANNULLA",null).show();
+    }
+    private void analyzeVision(){
+        Bitmap source=original;
+        if(source==null){visionStatus.setText("Prima apri una fotografia.");return;}
+        qwenReviewButton.setEnabled(false);
+        visionStatus.setText("QWEN-VL · Invio immagine al modello sullo STESSO Pixel; "+
+            "analisi semantica in corso…");
+        final int port=visionPort;
+        worker.execute(()->{
+            try{
+                LocalVisionReviewer.Result result=LocalVisionReviewer.inspect(source,port);
+                ui.post(()->{
+                    if(closing||original!=source)return;
+                    visionResult=result;
+                    visionStatus.setText("QWEN-VL · "+result.scoreLabel()+" · "+
+                        result.subject);
+                    subjectDescription=result.subject;
+                    subjectExplanation=result.scene+" "+result.composition;
+                    String description=result.narrative();
+                    report.setText(description);
+                    caption.setText("VERDETTO QWEN-VL: "+result.scoreLabel());
+                    teacher.setText("MAESTRO QWEN-VL · "+description);
+                    if(voice)say("Analisi del soggetto: "+result.subject+
+                        ". "+result.scene+". "+result.composition+
+                        ". Verdetto: "+result.scoreLabel()+". "+result.why);
+                });
+            }catch(Exception e){
+                ui.post(()->{if(!closing){
+                    visionStatus.setText("QWEN-VL NON DISPONIBILE: "+e.getMessage());
+                    caption.setText("VOTO ARTISTICO: NON VALUTATO · "+
+                        "Avvia un server multimodale Qwen3-VL sul Pixel.");
+                }});
+            }finally{
+                ui.post(()->{if(!closing)qwenReviewButton.setEnabled(original!=null);});
             }
         });
     }
@@ -908,7 +996,8 @@ public final class EditorActivity extends Activity {
                         "\nTONI: regolazione moderata di luci e ombre."+
                         "\nNessun dettaglio RAW ricreato o generato.");
                     caption.setText("AUTO PRO · "+session.best.plan.name+" · "+
-                        finalReview.score10+"/10 (stima tecnica post-elaborazione)");
+                        "indice tecnico post-elaborazione "+finalReview.metrics.score+
+                        "/100; giudizio artistico non assegnato");
                     refresh();beginAutoLesson();
                 });
             }catch(Exception e){ui.post(()->caption.setText("Auto Pro: "+e.getMessage()));}
