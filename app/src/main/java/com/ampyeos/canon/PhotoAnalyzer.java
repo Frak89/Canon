@@ -6,7 +6,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Deterministic, offline visual-quality heuristics. Not subject recognition or neural AI. */
+/** Diagnostics of light/edges ONLY. The numeric index is not photographic quality. */
 public final class PhotoAnalyzer {
     public static final class Result {
         public final int score;
@@ -19,7 +19,7 @@ public final class PhotoAnalyzer {
         }
         public String summary() {
             return "LUCE " + brightness + "/255  ·  ALTE LUCI " + highlights + "%  ·  OMBRE " + shadows
-                + "%  ·  DETTAGLIO " + detail + "  ·  SCORE " + score + "/100";
+                + "%  ·  DETTAGLIO " + detail + "  ·  INDICE TONALE " + score + "/100";
         }
     }
     private PhotoAnalyzer(){}
@@ -76,6 +76,7 @@ public final class PhotoAnalyzer {
         double cy=weights>1?weightedY/weights/(h-1):0.5;
         double third=Math.min(Math.min(Math.abs(cx-1.0/3),Math.abs(cx-2.0/3)),
                               Math.min(Math.abs(cy-1.0/3),Math.abs(cy-2.0/3)));
+        // Compatibility index for tonal comparisons; never an artistic vote.
         int score=90;
         if(avg<62 || avg>210) score-=22;
         if(highlights>8) score-=Math.min(22,highlights);
