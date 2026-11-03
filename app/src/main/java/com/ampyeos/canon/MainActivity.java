@@ -242,7 +242,8 @@ public final class MainActivity extends ComponentActivity implements SensorEvent
         long now=android.os.SystemClock.uptimeMillis();
         if(now-lastUi<420)return;
         lastUi=now;
-        score.setText("QUALITÀ TECNICA STIMATA "+result.score+"/100  ·  "+Math.max(1,Math.round(result.score/10f))+"/10");
+        score.setText("INDICE SOLO TONALE "+result.score+"/100 · "+
+            "VOTO FOTOGRAFICO: NON VALUTATO (serve Qwen-VL)");
         metrics.setText(result.summary());
         advice.setText(result.advice);
         histogram.setHistogram(result.histogram);
