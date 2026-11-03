@@ -238,8 +238,18 @@ public final class EditorActivity extends Activity {
             return insets;
         });
         root.requestApplyInsets();
-        TextView title=txt("AMPY▲EOS  /  COLOR LAB + CLASSROOM",18);title.setTextColor(CYAN);
-        root.addView(title);
+        LinearLayout header=new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title=txt("AMPY▲EOS  /  STUDIO PRO",16);
+        title.setTextColor(CYAN);
+        title.setSingleLine(true);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        header.addView(title,new LinearLayout.LayoutParams(0,dp(52),1));
+        Button fullPreview=AmpyButtons.toggle(this,"FOTO GRANDE",false);
+        fullPreview.setTextSize(11);
+        header.addView(fullPreview,new LinearLayout.LayoutParams(dp(150),dp(49)));
+        root.addView(header);
         FrameLayout area=new FrameLayout(this);area.setBackgroundColor(Color.BLACK);
         root.addView(area,new LinearLayout.LayoutParams(-1,0,1));
         image=new ImageView(this);image.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -257,7 +267,17 @@ public final class EditorActivity extends Activity {
         area.addView(comparison,new FrameLayout.LayoutParams(-1,-1));
         ScrollView scroller=new ScrollView(this);
         scroller.setFillViewport(false);
-        root.addView(scroller,new LinearLayout.LayoutParams(-1,dp(390)));
+        int height=Math.min(dp(350),
+            Math.max(dp(270),Math.round(getResources().getDisplayMetrics().heightPixels*.40f)));
+        root.addView(scroller,new LinearLayout.LayoutParams(-1,height));
+        fullPreview.setOnClickListener(v->{
+            boolean expanded=!fullPreview.isSelected();
+            AmpyButtons.setToggle(fullPreview,expanded);
+            scroller.setVisibility(expanded?View.GONE:View.VISIBLE);
+            fullPreview.setContentDescription(expanded?
+                "Anteprima fotografica ingrandita. Tocca per mostrare gli strumenti":
+                "Mostra anteprima fotografica ingrandita");
+        });
         LinearLayout panel=new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(3),dp(2),dp(3),dp(10));
