@@ -20,6 +20,29 @@ std::mutex inference_lock;
 std::once_flag initialization;
 std::atomic_bool stop_requested{false};
 
+/**
+ * Report real native stages; percentage is shown only while token generation
+ * actually runs. Everything before it is an indeterminate phase.
+ */
+void stage(JNIEnv* env,jobject listener,const char* name,int tokens=0,int tokenLimit=0) {
+    if(listener==nullptr)return;
+    jclass type=env->GetObjectClass(listener);
+    if(type==nullptr)return;
+    jmethodID method=env->GetMethodID(type,"onProgress","(Ljava/lang/String;II)V");
+    if(method==nullptr){env->DeleteLocalRef(type);return;}
+    jstring message=env->NewStringUTF(name);
+    if(message!=nullptr){
+        env->CallVoidMethod(listener,method,message,static_cast<jint>(tokens),
+                            static_cast<jint>(tokenLimit));
+        env->DeleteLocalRef(message);
+    }
+    env->DeleteLocalRef(type);
+}
+void stop_check() {
+    if(stop_requested.load())
+        throw std::runtime_error("Analisi Qwen annullata dall'utente");
+}
+
 void fail(JNIEnv* env,const std::string& message) {
     __android_log_print(ANDROID_LOG_ERROR,"AmpyEOS-Qwen","%s",message.c_str());
     jclass type=env->FindClass("java/lang/IllegalStateException");
@@ -96,10 +119,12 @@ Java_com_ampyeos_canon_NativeQwenVision_cancel(JNIEnv*,jclass) {
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_ampyeos_canon_NativeQwenVision_process(
     JNIEnv* env,jclass,jstring javaModel,jstring javaProjector,
-    jintArray javaPixels,jint width,jint height,jstring javaPrompt,jint maxTokens) {
+    jintArray javaPixels,jint width,jint height,jstring javaPrompt,jint maxTokens,
+    jobject listener) {
     std::lock_guard<std::mutex> guard(inference_lock);
     stop_requested=false;
     try {
+        stage(env,listener,"Inizializzazione motore llama.cpp");
         std::call_once(initialization, [](){
             llama_backend_init();
             ggml_backend_load_all();
@@ -112,12 +137,16 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
         if(maxTokens<1||maxTokens>1200)
             throw std::runtime_error("Requested token count outside safety limits");
 
+        stop_check();
+        stage(env,listener,"Caricamento modello Qwen 2B dalla memoria");
         Session session;
         auto params=llama_model_default_params();
         params.n_gpu_layers=0;
         session.model=llama_model_load_from_file(modelPath.c_str(),params);
         if(!session.model)
             throw std::runtime_error("Cannot load Qwen GGUF. Check model RAM/size.");
+        stop_check();
+        stage(env,listener,"Allocazione memoria e contesto Qwen");
 
         auto contextParams=llama_context_default_params();
         contextParams.n_ctx=4096;
@@ -128,6 +157,8 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
         session.context=llama_init_from_model(session.model,contextParams);
         if(!session.context)
             throw std::runtime_error("Cannot allocate Qwen context on this phone.");
+        stop_check();
+        stage(env,listener,"Caricamento proiettore visivo mmproj");
 
         auto imageParams=mtmd_context_params_default();
         imageParams.use_gpu=false;
@@ -136,6 +167,8 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
         session.vision=mtmd_init_from_file(projectorPath.c_str(),session.model,imageParams);
         if(!session.vision||!mtmd_support_vision(session.vision))
             throw std::runtime_error("The image projector is missing or incompatible.");
+        stop_check();
+        stage(env,listener,"Preparazione immagine e istruzioni fotografiche");
 
         session.chat=common_chat_templates_init(session.model,"");
         if(!session.chat)
@@ -167,11 +200,15 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
         mtmd::input_chunks_ptr chunks(mtmd_input_chunks_init());
         if(!chunks||mtmd_tokenize_from_parts(session.vision,chunks.get(),inputs,3,true)!=0)
             throw std::runtime_error("Vision tokens could not be produced.");
+        stop_check();
+        stage(env,listener,"Analisi dell'immagine sul Pixel (encoder vision)");
 
         llama_pos next=0;
         if(mtmd_helper_eval_chunks(session.vision,session.context,chunks.get(),
                                    0,0,512,true,&next)!=0)
             throw std::runtime_error("The vision encoder could not evaluate the image.");
+        stop_check();
+        stage(env,listener,"Generazione del verdetto fotografico",0,maxTokens);
 
         llama_sampler* sampler=llama_sampler_chain_init(
             llama_sampler_chain_default_params());
@@ -189,6 +226,8 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
                 llama_sampler_accept(sampler,token);
                 if(llama_vocab_is_eog(vocab,token))break;
                 answer+=token_to_utf8(vocab,token);
+                if(n%24==0)
+                    stage(env,listener,"Generazione del verdetto fotografico",n+1,maxTokens);
                 common_batch_clear(batch);
                 common_batch_add(batch,token,next++,{0},true);
                 if(llama_decode(session.context,batch)!=0)
@@ -203,6 +242,7 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
         llama_sampler_free(sampler);
         if(stop_requested)throw std::runtime_error("Analysis cancelled");
         if(answer.empty())throw std::runtime_error("Qwen returned no description");
+        stage(env,listener,"Verdetto generato: controllo dei dati e del JSON");
         return utf8(env,answer);
     }catch(const std::exception& e){
         fail(env,e.what());
