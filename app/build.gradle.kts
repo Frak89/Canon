@@ -1,5 +1,16 @@
 plugins { id("com.android.application") }
 
+// Optional permanent signing. CI uses a key from GitHub Actions secrets when
+// configured; otherwise debug APK signing remains ephemeral on fresh runners.
+// Never store a release keystore or passwords in this public repository.
+val signingPath = System.getenv("AMPYEOS_SIGNING_FILE")
+val signingPassword = System.getenv("AMPYEOS_SIGNING_PASSWORD")
+val signingAlias = System.getenv("AMPYEOS_SIGNING_ALIAS")
+val signingKeyPassword = System.getenv("AMPYEOS_SIGNING_KEY_PASSWORD")
+val hasPersistentSigning = !signingPath.isNullOrBlank() &&
+    !signingPassword.isNullOrBlank() && !signingAlias.isNullOrBlank() &&
+    !signingKeyPassword.isNullOrBlank() && file(signingPath).isFile
+
 android {
     namespace = "com.ampyeos.canon"
     compileSdk = 36
@@ -14,9 +25,23 @@ android {
         versionCode = 14
         versionName = "0.8.1"
     }
+    signingConfigs {
+        if (hasPersistentSigning) {
+            create("ampyeosStable") {
+                storeFile = file(signingPath!!)
+                storePassword = signingPassword
+                keyAlias = signingAlias
+                keyPassword = signingKeyPassword
+            }
+        }
+    }
     buildTypes {
         release { isMinifyEnabled = false }
-        debug { isMinifyEnabled = false }
+        debug {
+            isMinifyEnabled = false
+            if (hasPersistentSigning)
+                signingConfig = signingConfigs.getByName("ampyeosStable")
+        }
     }
     ndkVersion = "27.2.12479018"
     externalNativeBuild {
