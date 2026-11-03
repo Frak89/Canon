@@ -248,6 +248,7 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
         stage(env,listener,stageMessage.c_str());
 
         llama_pos next=0;
+        const auto visionStarted=std::chrono::steady_clock::now();
         if(mtmd_helper_eval_chunks(session.vision,session.context,chunks.get(),
                                    0,0,256,true,&next)!=0) {
             if(deadline.exceeded())throw std::runtime_error(
@@ -258,6 +259,11 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
         if(deadline.exceeded())throw std::runtime_error(
             "Encoder visivo troppo lento per la CPU del Pixel: tempo limite superato.");
         stop_check();
+        const long visionMs=std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now()-visionStarted).count();
+        const std::string visionFinished="Encoder completato in "+
+            std::to_string(visionMs)+" ms · generazione testo";
+        stage(env,listener,visionFinished.c_str());
         stage(env,listener,"Generazione del verdetto fotografico",0,maxTokens);
 
         llama_sampler* sampler=llama_sampler_chain_init(
