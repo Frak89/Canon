@@ -202,7 +202,8 @@ std::unique_ptr<Session> load_session(
     // and no reduced vision-token cap: the user's photo retains its detail.
     mp.cb_eval=observe_vision;
     mp.cb_eval_user_data=&session->deadline;
-    stage(env,listener,"Inizializzo il proiettore visivo "+backend);
+    const std::string projectorMessage="Inizializzo il proiettore visivo "+backend;
+    stage(env,listener,projectorMessage.c_str());
     session->vision=mtmd_init_from_file(projectorPath.c_str(),session->model,mp);
     if(!session->vision || !mtmd_support_vision(session->vision))
         throw std::runtime_error("Proiettore Qwen-VL incompatibile con il modello");
