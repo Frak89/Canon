@@ -48,7 +48,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * fully visual 5-step lessons and export of a new JPEG copy to MediaStore.
  */
 public final class EditorActivity extends Activity {
-    private static final int PICK=1, PICK_GROUP=2, PICK_MODEL=3, CYAN=0xff43eadb, BG=0xff080f1a;
+    private static final int PICK=1, PICK_GROUP=2, PICK_MODEL=3, PICK_MUSIQ=4, CYAN=0xff43eadb, BG=0xff080f1a;
     private final Handler ui=new Handler(Looper.getMainLooper());
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final AtomicInteger generation=new AtomicInteger();
@@ -64,6 +64,8 @@ public final class EditorActivity extends Activity {
     private ExtraRecognition extraRecognition;
     private Button extraAiToggle,mobileAiToggle;
     private TextView modelStatus;
+    private TextView learnedStatus;
+    private LearnedQuality.Result learnedResult;
     private int extraRequests=0;
     private String subjectDescription="Analisi soggetto non avviata";
     private String subjectExplanation="Attendo il riconoscimento ML Kit per spiegare che cosa è stato rilevato.";
@@ -192,6 +194,9 @@ public final class EditorActivity extends Activity {
                 "download su Wi-Fi e "+(extraRecognition.allowMobileAuto()?"4G/5G":"dati mobili spenti")),
             12);
         modelStatus.setTextColor(0xff8debd2);panel.addView(modelStatus);
+        learnedStatus=txt("MUSIQ · "+LearnedQuality.status(this)+
+            " · qualità percettiva appresa (NON voto artistico)",12);
+        learnedStatus.setTextColor(0xfff2c88f);panel.addView(learnedStatus);
         LinearLayout localModelRow=row(panel);
         button("IMPORTA MODELLO DA DOWNLOAD",localModelRow,v->pickModel());
         button("INFO MODELLI",localModelRow,v->new AlertDialog.Builder(this)
@@ -214,6 +219,8 @@ public final class EditorActivity extends Activity {
         report=txt("L'originale non viene mai sovrascritto.",12);panel.addView(report);
         LinearLayout tools=row(panel);
         button("APRI FOTO",tools,v->pick(false));
+        button("IMPORTA MUSIQ ONNX",tools,v->pickMusiq());
+        actionPhoto("VALUTA QUALITÀ MUSIQ",tools,v->analyzeMusiq());
         button("ORDINA PER DATI TECNICI",tools,v->pick(true));
         actionPhoto("AUTO LOOK TECNICO",tools,v->autoMaster());
         actionPhoto("AUTO TONO + CROP",tools,v->autoPro());
@@ -309,6 +316,10 @@ public final class EditorActivity extends Activity {
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
         if(result!=RESULT_OK||data==null)return;
+        if(request==PICK_MUSIQ&&data.getData()!=null){
+            importMusiq(data.getData());
+            return;
+        }
         if(request==PICK_MODEL&&data.getData()!=null){
             importModel(data.getData());
             return;
@@ -348,6 +359,60 @@ public final class EditorActivity extends Activity {
             }
         });
     }
+
+    private void pickMusiq(){
+        new AlertDialog.Builder(this)
+            .setTitle("Modello MUSIQ via ONNX Runtime")
+            .setMessage("Questo è un vero modello di qualità percettiva appreso da fotografie. "+
+                "Scarica i file ufficiali musiq_model.onnx e musiq_model.onnx.data "+
+                "dal repository 86Cao/IQA-ONNX-Models su Hugging Face, poi selezionali "+
+                "separatamente dal telefono. Non può giudicare contenuto o valore artistico; "+
+                "per quello serve Qwen-VL.")
+            .setPositiveButton("SELEZIONA FILE",(d,w)->{
+                Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("*/*");
+                startActivityForResult(intent,PICK_MUSIQ);
+            })
+            .setNeutralButton("APRI REPOSITORY",(d,w)->{
+                Intent browser=new Intent(Intent.ACTION_VIEW,
+                    Uri.parse("https://huggingface.co/86Cao/IQA-ONNX-Models/tree/main"));
+                startActivity(browser);
+            })
+            .setNegativeButton("CHIUDI",null).show();
+    }
+    private void importMusiq(Uri uri){
+        learnedStatus.setText("MUSIQ · importazione modello ONNX in corso…");
+        worker.execute(()->{
+            try{
+                String result=LearnedQuality.importFile(getApplicationContext(),uri);
+                ui.post(()->{if(!closing)learnedStatus.setText("MUSIQ · "+result);});
+            }catch(Exception e){
+                ui.post(()->{if(!closing)learnedStatus.setText("MUSIQ · "+e.getMessage());});
+            }
+        });
+    }
+    private void analyzeMusiq(){
+        Bitmap image=original;
+        if(image==null){learnedStatus.setText("MUSIQ · apri prima una foto.");return;}
+        learnedStatus.setText("MUSIQ · eseguo rete neurale ONNX reale…");
+        worker.execute(()->{
+            try{
+                LearnedQuality.Result result=LearnedQuality.assess(
+                    getApplicationContext(),image);
+                ui.post(()->{
+                    if(closing||original!=image)return;
+                    learnedResult=result;
+                    learnedStatus.setText(result.describe());
+                });
+            }catch(Exception e){
+                ui.post(()->{
+                    if(!closing&&original==image)
+                        learnedStatus.setText("MUSIQ · modello assente o non compatibile: "+e.getMessage());
+                });
+            }
+        });
+    }
     private Bitmap decode(Uri uri)throws Exception{
         BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;
         try(InputStream stream=getContentResolver().openInputStream(uri)){
@@ -375,6 +440,9 @@ public final class EditorActivity extends Activity {
                     if(closing)return;
                     stopAutoLesson();comparison.setVisibility(View.GONE);compareOn=false;
                     masterSession=null;activePlan=null;visionResult=null;
+                    learnedResult=null;
+                    learnedStatus.setText("MUSIQ · "+LearnedQuality.status(this)+
+                        " · premi VALUTA QUALITÀ MUSIQ per calcolare la qualità percettiva");
                     visionStatus.setText("QWEN-VL · Foto caricata; in attesa di analisi semantica.");
                     original=b;working=b;originalReview=r;inspection=visual;
                     qwenReviewButton.setEnabled(true);
