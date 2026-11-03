@@ -1,6 +1,20 @@
-# AmpyEOS 0.7.0 — Qwen3-VL nativo, foto private sul Pixel
+# AmpyEOS 0.8.0 — Studio Pro, Qwen Vision e Auto Raddrizza
 
 App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
+
+## Novità v0.8.0 — interfaccia professionale e foto automaticamente dritte
+
+- **Editor semplificato:** sette pannelli espandibili con controlli responsive su **due colonne**: Scatto & Raddrizzamento, Maestro Qwen, Risultati, Editor, Color Lab, Classroom e Modelli. Non c'è più una barra orizzontale interminabile.
+- **RADDRIZZAMENTO ALL'APERTURA · ON:** impostazione attiva per default, mantenuta tra gli avvii. L'editor legge prima i dati EXIF Orientation, poi cerca strutture orizzontali/verticali in più zone del frame e corregge lievi inclinazioni attendibili. Se trova solo una diagonale o non può stabilire l'orizzonte, evita correzioni arbitrarie.
+- **RADDRIZZA ADESSO** ripete il controllo sull'attuale copia di lavoro; **CORREZIONE FINE ±10°** offre anteprima in tempo reale e rotazione regolabile a passi di 0,1°. La foto sorgente non viene mai sovrascritta.
+- All'apertura il look resta **NATURALE** e la griglia turchese della Virtual Classroom rimane nascosta fino all'avvio della lezione.
+- **Qwen offline più pratico:** analisi rapida, approfondita e confronto originale/proposta, spiegazioni narrative e avvertenze; monitoraggio delle fasi native e diagnostica locale della RAM/temperatura. L'analisi usa una coda separata dai render dell'editor per mantenere attivi gli altri comandi.
+- **MUSIQ ONNX /100** rimane un indicatore neurale di qualità percettiva, distinto da qualunque giudizio artistico. L'app non assegna automaticamente 9/10 a fotografie senza soggetto soltanto perché correttamente esposte.
+- Nessuna foto inviata per analisi su server o servizi esterni; Internet serve ai download espliciti dei modelli e alle funzioni fotografiche Canon su rete locale.
+
+**Guida completa e limiti del raddrizzamento:** [docs/AmpyEOS_Rev08_Studio_UI_AutoLevel.md](docs/AmpyEOS_Rev08_Studio_UI_AutoLevel.md)
+
+**Verifiche:** l'esito della compilazione Android è controllato in GitHub Actions. La valutazione effettiva di linee inclinate e la qualità dell'inferenza Qwen devono essere verificate ancora con un set di scatti reali sul Pixel 7 Pro. Il modulo non promette che ogni fotografia contenga un orizzonte misurabile.
 
 ## Rev0.7 — Modello visivo serio, completamente dentro l'APK
 
