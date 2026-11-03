@@ -15,6 +15,8 @@ App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
 
 **Guida:** [docs/AmpyEOS_Rev081_Persistent_Models.md](docs/AmpyEOS_Rev081_Persistent_Models.md)
 
+**Aggiornamenti senza disinstallazione:** il workflow può firmare le APK con un certificato stabile tramite GitHub Secrets (da configurare una volta sola). Senza questo passaggio, i runner GitHub possono usare firme debug differenti. [Guida alla firma stabile e salvataggio di emergenza dei modelli](docs/AmpyEOS_Persistent_APK_Signing.md).
+
 > La build CI verifica che codice Android e JNI compilino. L'accesso e il recupero dei file pubblici tramite Android MediaStore, incluso il caso di reinstallazione, devono essere provati sul Pixel 7 Pro reale. Il sistema non promette di resistere alla cancellazione manuale dei GGUF o a un reset del telefono.
 
 ## Novità v0.8.0 — interfaccia professionale e foto automaticamente dritte
