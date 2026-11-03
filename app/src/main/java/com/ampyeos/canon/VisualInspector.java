@@ -36,10 +36,10 @@ public final class VisualInspector {
                     lineAngleDegrees,100*lineConfidence):
                 "Nessuna linea quasi orizzontale affidabile rilevata.";
             return "ESPOSIZIONE / TONI\n"+technical.summary()+
-                "\nPunteggio tonale indicativo: "+tonalScore+"/100"+
+                "\nIndice diagnostico luce/contorni: "+tonalScore+"/100"+
                 "\n\nCOMPOSIZIONE MISURABILE\nDistribuzione di dettaglio: "+balanceScore+
                 "/100 · Vicinanza ai terzi: "+thirdsScore+
-                "/100 · Indicatore compositivo: "+compositionScore+"/100"+
+                "/100 · Indicatore geometrico NON artistico: "+compositionScore+"/100"+
                 "\nCentro di dettaglio: "+Math.round(100*focusX)+"% larghezza, "+
                 Math.round(100*focusY)+"% altezza.\n"+line+
                 "\n\nCHE COSA MOSTRO\n"+summary+"\n"+explanation+
