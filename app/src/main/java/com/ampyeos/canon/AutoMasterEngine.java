@@ -89,7 +89,8 @@ public final class AutoMasterEngine {
             else bitmap=render(analysis,p);
             PhotoAnalyzer.Result stats=PhotoAnalyzer.fromBitmap(bitmap);
             double quality=quality(stats,p,baseline.metrics);
-            int vote=Math.max(1,Math.min(10,(int)Math.round(quality/10)));
+            // Never translate tonal metrics to an aesthetic 1-10 vote.
+            int vote=0;
             String why=explain(baseline.metrics,stats,p);
             candidates.add(new Candidate(p,bitmap,stats,quality,vote,why));
         }
@@ -100,9 +101,14 @@ public final class AutoMasterEngine {
         // Require a measurable gain; don't pretend an edit is better when the metric is flat.
         if(originalCandidate!=null && winning.quality<originalCandidate.quality+1.3)
             winning=originalCandidate;
-        String result="Originale "+(originalCandidate==null?baseline.score10:originalCandidate.vote)
-            +"/10; proposta "+winning.vote+"/10. "+winning.rationale
-            +" Valutazioni esclusivamente tecniche ed euristiche: nessuna modifica può inventare dettagli perduti.";
+        String result="Confronto soltanto tecnico: originale "+
+            (originalCandidate==null?baseline.metrics.score:
+                String.format(Locale.ITALIAN,"%.1f",originalCandidate.quality))+
+            "/100; proposta "+
+            String.format(Locale.ITALIAN,"%.1f",winning.quality)+
+            "/100. "+winning.rationale+
+            " Non è stato attribuito nessun voto artistico: il significato "+
+            "della scena richiede un modello visivo multimodale.";
         return new Session(baseline,candidates,winning,result,baseline.how);
     }
 
