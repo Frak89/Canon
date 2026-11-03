@@ -242,7 +242,10 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
         if(!chunks||mtmd_tokenize_from_parts(session.vision,chunks.get(),inputs,3,true)!=0)
             throw std::runtime_error("Vision tokens could not be produced.");
         stop_check();
-        stage(env,listener,"Encoder Qwen CPU · max "+std::to_string(maxImageTokens)+" token visivi · scadenza "+std::to_string(budgetSeconds)+"s");
+        const std::string stageMessage="Encoder Qwen CPU: max "+
+            std::to_string(maxImageTokens)+" token visivi, limite "+
+            std::to_string(budgetSeconds)+"s";
+        stage(env,listener,stageMessage.c_str());
 
         llama_pos next=0;
         if(mtmd_helper_eval_chunks(session.vision,session.context,chunks.get(),
