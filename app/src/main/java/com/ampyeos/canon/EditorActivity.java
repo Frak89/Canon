@@ -844,7 +844,10 @@ public final class EditorActivity extends Activity {
         selectedLook=ColorLooks.Look.NATURALE;looks.setSelection(0);
         brightness.setProgress(100);contrast.setProgress(100);saturation.setProgress(100);
         crop.setCropEnabled(false);crop.setBitmapSize(original.getWidth(),original.getHeight());
-        refresh();showStep(0);updateButtonAvailability();
+        lesson.setVisibility(View.GONE);
+        caption.setText("Immagine originale ripristinata: ritaglio, inclinazione "+
+            "e filtri rimossi dalla copia di lavoro.");
+        refresh();updateButtonAvailability();
     }
     private void explain(){
         if(original==null||display==null)return;
