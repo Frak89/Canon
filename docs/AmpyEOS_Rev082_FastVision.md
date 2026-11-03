@@ -12,9 +12,16 @@ from the model and only checked cancellation between large native stages.
 
 ## Changes
 
-- **Quick Qwen:** 224px long side, capped ~64 image tokens, 500 output tokens, 90s budget.
-- **Deep Qwen:** 320px long side, capped ~131 image tokens, 880 output tokens, 180s budget.
-- **Comparison:** 384px long side, capped ~188 image tokens, 650 output tokens, 180s budget.
+- **ANALISI RAPIDA LOCALE** (immediata): analisi fotografia con ML Kit,
+  misurazioni dei pixel, composizione geometrica e MUSIQ se già eseguito.
+  **Non carica Qwen** e non produce voti artistici.
+- **Qwen approfondito**: 320px long side, capped ~131 image tokens,
+  880 output tokens, **60s cooperative CPU budget**.
+- **Confronto Qwen**: 384px long side, capped ~188 image tokens,
+  650 output tokens, **60s cooperative CPU budget**.
+- La modalità precedente "Qwen rapido" rimane come metodo interno
+  non esposto nella UI, con una preview ridotta; la UI ora privilegia
+  la diagnosi locale realmente leggera.
 - **Native image preprocessor limit:** \`mtmd_context_params.image_min_tokens=16\` and
   \`image_max_tokens\` computed from the actual input dimensions; the old code only
   resized the Android Bitmap, allowing the vision preprocessor to do additional work.
@@ -47,9 +54,10 @@ and never leaves the device for analysis.
 
 ## Acceptance tests
 
-1. Start Quick analysis on the photo of the Venice boat and bridge. Measure time
-   until the first output token and total completion. Confirm less work than the
-   previous build and watch the deadline; do not assume success.
+1. Start **ANALISI RAPIDA LOCALE** on the Venice boat photo:
+   confirm it returns technical observations independently of the Qwen GGUF
+   and without claiming to recognize the boat unless the object model detects it.
+   Do not label its output as the Qwen multimodal verdict.
 2. Press **FERMA ANALISI** during "encoder vision": verify that callback begins
    cancellation and the UI eventually returns to idle without a process crash.
 3. In Quick analysis without internet access, check that no HTTP call is made
@@ -59,6 +67,8 @@ and never leaves the device for analysis.
 5. If quick timeout occurs, app should show **no invented numerical 9/10**;
    fall back to MUSIQ and the technical visual report.
 6. Monitor Pixel memory and temperature on repeated analyses.
+7. Run Qwen Deep only if needed; check its ~60-second budget and cooperative
+   cancellation even when the encoder stalls; do not assume hard preemption.
 
 ## Practical recommendation
 
