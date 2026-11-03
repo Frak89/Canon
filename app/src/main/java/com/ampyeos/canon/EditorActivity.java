@@ -9,6 +9,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.RectF;
+import android.media.ExifInterface;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -89,6 +90,9 @@ public final class EditorActivity extends Activity {
     private Button qwenReviewButton;
     private QwenModelManager qwenModels;
     private Button qwenDownloadButton,qwenStopButton,qwenQuickButton,qwenCompareButton;
+    private Button autoLevelToggle,autoLevelManualButton;
+    private boolean autoLevelOnOpen=true;
+    private AutoLevel.Result lastAutoLevel;
     private VisionDiagnostics visionDiagnostics;
     private String comparisonVerdict="";
     private boolean qwenAnalyzing=false;
@@ -468,19 +472,54 @@ public final class EditorActivity extends Activity {
         BitmapFactory.Options opt=new BitmapFactory.Options();
         int sample=1;while(Math.max(bounds.outWidth,bounds.outHeight)/sample>2300)sample*=2;
         opt.inSampleSize=sample;opt.inPreferredConfig=Bitmap.Config.ARGB_8888;
+        Bitmap bitmap;
         try(InputStream stream=getContentResolver().openInputStream(uri)){
-            Bitmap bitmap=BitmapFactory.decodeStream(stream,null,opt);
+            bitmap=BitmapFactory.decodeStream(stream,null,opt);
             if(bitmap==null)throw new Exception("Immagine non decodificabile");
-            return bitmap;
         }
+        // Match the camera's orientation metadata without changing the source.
+        int orientation=ExifInterface.ORIENTATION_NORMAL;
+        try(InputStream stream=getContentResolver().openInputStream(uri)){
+            if(stream!=null){
+                ExifInterface exif=new ExifInterface(stream);
+                orientation=exif.getAttributeInt(ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL);
+            }
+        }catch(Exception ignored) { /* JPEGs with missing EXIF are still valid. */ }
+        Matrix exifMatrix=new Matrix();
+        switch(orientation){
+            case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                exifMatrix.postScale(-1,1);break;
+            case ExifInterface.ORIENTATION_ROTATE_180:
+                exifMatrix.postRotate(180);break;
+            case ExifInterface.ORIENTATION_FLIP_VERTICAL:
+                exifMatrix.postScale(1,-1);break;
+            case ExifInterface.ORIENTATION_TRANSPOSE:
+                exifMatrix.postRotate(90);exifMatrix.postScale(-1,1);break;
+            case ExifInterface.ORIENTATION_ROTATE_90:
+                exifMatrix.postRotate(90);break;
+            case ExifInterface.ORIENTATION_TRANSVERSE:
+                exifMatrix.postRotate(270);exifMatrix.postScale(-1,1);break;
+            case ExifInterface.ORIENTATION_ROTATE_270:
+                exifMatrix.postRotate(270);break;
+            default:return bitmap;
+        }
+        Bitmap rotated=Bitmap.createBitmap(bitmap,0,0,bitmap.getWidth(),
+            bitmap.getHeight(),exifMatrix,true);
+        if(rotated!=bitmap)bitmap.recycle();
+        return rotated;
     }
     private void load(Uri uri){
         caption.setText("Caricamento immagine…");originUri=uri;
         worker.execute(()->{
             try{
                 Bitmap b=decode(uri);
+                boolean doLevel=getPreferences(MODE_PRIVATE)
+                    .getBoolean("auto_level_on_open",true);
+                AutoLevel.Result alignment=AutoLevel.estimate(b);
+                Bitmap leveled=doLevel?AutoLevel.corrected(b,alignment):b;
                 PhotoReview r=PhotoReview.inspect(b);
-                VisualInspector.Report visual=VisualInspector.analyze(b);
+                VisualInspector.Report visual=VisualInspector.analyze(leveled);
                 ui.post(()->{
                     if(closing)return;
                     stopAutoLesson();comparison.setVisibility(View.GONE);compareOn=false;
@@ -490,9 +529,12 @@ public final class EditorActivity extends Activity {
                     learnedStatus.setText("MUSIQ · "+LearnedQuality.status(this)+
                         " · premi VALUTA QUALITÀ MUSIQ per calcolare la qualità percettiva");
                     visionStatus.setText("QWEN-VL · Foto caricata; in attesa di analisi semantica.");
-                    original=b;working=b;originalReview=r;inspection=visual;
+                    original=b;working=leveled;originalReview=r;inspection=visual;
+                    lastAutoLevel=alignment;
                     updateButtonAvailability();
-                    image.setImageBitmap(b); // Show the actual decoded source immediately.
+                    image.setImageBitmap(leveled);
+                    caption.setText(doLevel?alignment.summary():
+                        "Auto Raddrizza all'apertura disattivato. Puoi attivarlo dalle opzioni.");
                     if(r.metrics.brightness<14 && r.metrics.detail<8)
                         modelStatus.setText("AVVISO IMMAGINE: i pixel del file risultano quasi neri. "+
                             "Verifica che il JPEG/PNG selezionato mostri davvero una fotografia.");
@@ -500,9 +542,9 @@ public final class EditorActivity extends Activity {
                     subjectExplanation="Il modello sta analizzando questa fotografia.";
                     extraRequests++;
                     visualOverlay.setSubject(null,"");
-                    visualOverlay.configure(visual,b.getWidth(),b.getHeight());
+                    visualOverlay.configure(visual,leveled.getWidth(),leveled.getHeight());
                     visualOverlay.setVisibility(View.GONE);showVisual=false;
-                    if(stillSubject!=null)stillSubject.observe(b,observation->ui.post(()->{
+                    if(stillSubject!=null)stillSubject.observe(leveled,observation->ui.post(()->{
                         if(closing||original!=b)return;
                         subjectDescription=observation.description;
                         subjectExplanation=observation.explanation;
