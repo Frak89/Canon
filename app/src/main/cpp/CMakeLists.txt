@@ -40,6 +40,13 @@ if(NOT EXISTS "${LLAMA_SRC}/CMakeLists.txt")
 endif()
 add_subdirectory("${LLAMA_SRC}" "${CMAKE_BINARY_DIR}/llama-src")
 
+# Android NDK lacks Vulkan-Hpp C++ wrappers although it has Vulkan C API.
+# Stage only Vulkan headers from Ubuntu CI (not host system headers).
+set(AMPYEOS_VK_HPP "${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/vulkan_headers")
+if(EXISTS "${AMPYEOS_VK_HPP}/vulkan/vulkan.hpp")
+    target_include_directories(ggml-vulkan PRIVATE "${AMPYEOS_VK_HPP}")
+endif()
+
 add_library(ampyeos-vision SHARED ampyeos_vision.cpp)
 target_include_directories(ampyeos-vision PRIVATE
     "${LLAMA_SRC}/include"
