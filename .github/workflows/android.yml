@@ -59,7 +59,11 @@ jobs:
           # the host /usr/include (which contains incompatible glibc headers).
           mkdir -p third_party/vulkan_headers
           cp -a /usr/include/vulkan third_party/vulkan_headers/
+          # SPIRV-Headers also ships header-only C++ definitions absent
+          # from Android NDK; stage them with Vulkan-Hpp for cross-build.
+          cp -a /usr/include/spirv third_party/vulkan_headers/
           test -f third_party/vulkan_headers/vulkan/vulkan.hpp
+          test -f third_party/vulkan_headers/spirv/unified1/spirv.hpp
           echo "SPIR-V headers:"
           find /usr -name 'SPIRV-HeadersConfig.cmake' -o -name 'SPIRV-Headers-config.cmake' 2>/dev/null | head
       - name: Gradle 8.11.1
