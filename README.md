@@ -29,6 +29,20 @@ Qwen-VL non è incluso nell'APK e non è stato ancora verificato
 fisicamente sul Pixel. Il confronto artistico non deve essere dichiarato
 affidabile senza una prova sulla scena reale.
 
+## Rev0.6 — niente più voti fotografici inventati
+
+La vecchia app iniziava da 90/100 e trasformava un indice di luminosità/contrasto in 9/10 anche quando la foto non aveva soggetto o senso compositivo. Questo comportamento è stato eliminato: gli indici `PhotoAnalyzer` e `AutoMasterEngine` sono esplicitamente **tecnici**, non voti artistici.
+
+Sono ora presenti due percorsi indipendenti:
+- **Qwen3-VL 2B Instruct via `llama.cpp` locale:** il pulsante **ANALIZZA SCENA CON QWEN-VL** nell'editor parla realmente della foto usando un modello multimodale, con descrizione di oggetti, composizione, criticità, suggerimenti e incertezza. **Non è incluso un runtime Qwen nell'APK**: richiede Qwen3-VL + proiettore `mmproj` caricati in un server sullo stesso Pixel tramite Termux, raggiungibile a `127.0.0.1:8080`. La porta è configurabile. Quando il modello non risponde, il voto rimane non valutabile.
+- **MUSIQ con ONNX Runtime 1.31.1:** tramite **IMPORTA MUSIQ ONNX** carica da Download `musiq_model.onnx` e `musiq_model.onnx.data` dal repository `86Cao/IQA-ONNX-Models`; premi **VALUTA QUALITÀ MUSIQ** per calcolare un punteggio appreso di qualità percettiva, senza confonderlo con merito artistico. L'APK non include i pesi di MUSIQ.
+
+L'analisi ML Kit e MobileNet rimane utile per riconoscimento di categorie, non per voti estetici. Il maestro della Virtual Classroom mostra ora il verdetto Qwen solo quando c'è stata un'analisi visiva reale.
+
+**Guida completa:** [docs/AmpyEOS_Rev06_RealVision.md](docs/AmpyEOS_Rev06_RealVision.md)
+
+> Nota sui test: compilazione e caricamento APK verificati in GitHub Actions. L'inferenza MUSIQ con i pesi importati e l'avvio di Qwen-VL su Pixel 7 Pro reale non sono ancora verificati in hardware. Qwen e MUSIQ possono comunque sbagliare: i loro risultati sono stime, non misure oggettive di valore artistico.
+
 ## Novità v0.5.3 · Correzione dell'estrazione TAR del modello AI
 
 - Corretto l'errore reale `Modello AI non disponibile: Voce archivio fuori limiti` sul Pixel. La versione precedente imponeva un limite di 256 MiB anche a file di checkpoint e altri elementi **non necessari** dell'archivio, oltre a interrompere la scansione dopo soli 80 MiB estratti.
