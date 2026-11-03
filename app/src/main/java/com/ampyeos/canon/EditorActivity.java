@@ -521,7 +521,9 @@ public final class EditorActivity extends Activity {
         gridAction("SALVA MODELLI IN DOWNLOAD",publicModels,v->saveQwenToDownloads());
         LinearLayout downloadPair=paired(modelsSection);
         gridAction("IMPORTA GGUF DA DOWNLOAD",downloadPair,v->pickQwen());
-        gridAction("FILE QWEN IN DOWNLOAD",paired(modelsSection),v->showQwenFiles());
+        LinearLayout healthPair=paired(modelsSection);
+        gridAction("FILE QWEN IN DOWNLOAD",healthPair,v->showQwenFiles());
+        gridAction("TEST CARICAMENTO QWEN",healthPair,v->testQwenLoading());
         gridAction("SOSPENDI DOWNLOAD",downloadPair,v->{
             if(QwenDownloadService.isActive(this)){
                 QwenDownloadService.cancelDownload(this);
@@ -1255,6 +1257,38 @@ public final class EditorActivity extends Activity {
 
     /** Copies verified model files from the previous private cache when possible.
      *  Never makes a network request or deletes the only valid copy. */
+    /** Diagnoses whether both on-device GGUF descriptors can be loaded by JNI. */
+    private void testQwenLoading(){
+        if(qwenModels==null)return;
+        visionStatus.setText("QWEN · Controllo accesso ai due modelli locali…");
+        fastWorker.execute(()->{
+            try{
+                String result=qwenModels.loaderTest();
+                ui.post(()->{
+                    if(closing)return;
+                    visionStatus.setText("TEST QWEN · "+result);
+                    new AlertDialog.Builder(this)
+                        .setTitle("Modello Qwen · controllo file")
+                        .setMessage(result+"\n\nQuesto verifica i file, non la "+
+                            "velocità dell'encoder né l'intera inferenza.")
+                        .setPositiveButton("OK",null).show();
+                });
+            }catch(Exception error){
+                String explanation=error.getMessage()==null?
+                    error.getClass().getSimpleName():error.getMessage();
+                ui.post(()->{
+                    if(closing)return;
+                    visionStatus.setText("TEST QWEN FALLITO · "+explanation);
+                    new AlertDialog.Builder(this)
+                        .setTitle("Qwen non caricabile")
+                        .setMessage(explanation+"\n\n"+qwenModels.filesReport())
+                        .setPositiveButton("RICOLLEGA FILE",(d,w)->pickQwen())
+                        .setNegativeButton("CHIUDI",null).show();
+                });
+            }
+        });
+    }
+
     private void showQwenFiles(){
         String fileList=qwenModels==null?"Gestore Qwen non disponibile":
             qwenModels.filesReport();
