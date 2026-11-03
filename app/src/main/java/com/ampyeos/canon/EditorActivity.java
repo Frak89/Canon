@@ -345,8 +345,8 @@ public final class EditorActivity extends Activity {
         qwenSpinner.setVisibility(View.GONE);
         aiSection.addView(qwenSpinner,new LinearLayout.LayoutParams(-1,dp(5)));
         LinearLayout analysisPair=paired(aiSection);
-        qwenQuickButton=gridPhoto("QWEN RAPIDO · MAX 90s",analysisPair,
-            v->startQwen(true,false));
+        qwenQuickButton=gridPhoto("ANALISI RAPIDA LOCALE",analysisPair,
+            v->analyzeFastLocal());
         qwenReviewButton=gridPhoto("QWEN PROFONDO · MAX 180s",analysisPair,
             v->analyzeVision());
         LinearLayout comparePair=paired(aiSection);
