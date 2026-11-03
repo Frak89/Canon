@@ -98,8 +98,10 @@ jstring utf8(JNIEnv* env,const std::string& str){
     return static_cast<jstring>(value);
 }
 std::vector<uint8_t> to_rgb(JNIEnv* env,jintArray javaPixels,int width,int height){
-    if(width<=0||height<=0||width>2048||height>2048||
-       env->GetArrayLength(javaPixels)!=width*height)
+    const int64_t area=static_cast<int64_t>(width)*height;
+    if(width<=0||height<=0||width>8192||height>8192||
+       area<=0||area>32000000LL||
+       env->GetArrayLength(javaPixels)!=area)
         throw std::runtime_error("Invalid image dimensions for on-device model");
     std::vector<jint> argb(static_cast<size_t>(width)*height);
     env->GetIntArrayRegion(javaPixels,0,width*height,argb.data());
@@ -217,6 +219,15 @@ Java_com_ampyeos_canon_NativeQwenVision_cancel(JNIEnv*,jclass) {
     stop_requested=true;
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_ampyeos_canon_NativeQwenVision_releaseModels(JNIEnv*,jclass) {
+    // Optional memory release. Do not execute from the Android UI thread:
+    // an ongoing inference owns the lock.
+    std::lock_guard<std::mutex> guard(inference_lock);
+    stop_requested.store(true);
+    cached.reset();
+}
+
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_ampyeos_canon_NativeQwenVision_process(
     JNIEnv* env,jclass,jstring javaModel,jstring javaProjector,
@@ -239,7 +250,7 @@ Java_com_ampyeos_canon_NativeQwenVision_process(
         const std::string projectorPath=read(env,javaProjector);
         const std::string prompt=read(env,javaPrompt);
         std::vector<uint8_t> rgb=to_rgb(env,javaPixels,width,height);
-        if(maxTokens<1||maxTokens>1200)
+        if(maxTokens<1||maxTokens>1800)
             throw std::runtime_error("Requested token count outside safety limits");
 
         stop_check();
