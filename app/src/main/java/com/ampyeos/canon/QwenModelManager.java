@@ -73,6 +73,71 @@ public final class QwenModelManager {
     }
     public void cancel(){cancelled=true;}
     public void close(){closed=true;cancelled=true;work.shutdownNow();}
+
+    /** Android SAF import, including the system Downloads folder. */
+    public void importFile(Uri uri,Listener listener) {
+        if(closed||uri==null)return;
+        if(!busy.compareAndSet(false,true)){
+            report(listener,"Un'altra operazione AI è ancora in esecuzione",0);
+            return;
+        }
+        cancelled=false;
+        work.execute(()->{
+            File staging=null;
+            try{
+                if(!folder.exists()&&!folder.mkdirs())
+                    throw new Exception("Cartella modelli non disponibile");
+                String filename=null;
+                try(Cursor c=app.getContentResolver().query(uri,
+                        new String[]{OpenableColumns.DISPLAY_NAME},null,null,null)){
+                    if(c!=null&&c.moveToFirst())filename=c.getString(0);
+                }
+                if(filename==null)
+                    throw new Exception("Nome modello non disponibile dal selettore file");
+                final long expected;
+                final String hash;
+                if(filename.equals(MODEL)){expected=MODEL_SIZE;hash=MODEL_SHA;}
+                else if(filename.equals(PROJECTOR)){expected=PROJECTOR_SIZE;hash=PROJECTOR_SHA;}
+                else throw new Exception("File non compatibile: seleziona "+
+                    MODEL+" oppure "+PROJECTOR);
+                staging=new File(folder,filename+".import");
+                if(staging.exists()&&!staging.delete())throw new Exception("Import temporaneo non sostituibile");
+                report(listener,"Importazione locale da Download: "+filename,0);
+                long size=0,last=0;
+                try(InputStream in=app.getContentResolver().openInputStream(uri);
+                    RandomAccessFile out=new RandomAccessFile(staging,"rw")){
+                    if(in==null)throw new Exception("Android non può leggere il documento selezionato");
+                    byte[] buffer=new byte[128*1024];int n;
+                    while((n=in.read(buffer))!=-1){
+                        if(cancelled||closed)throw new Exception("Importazione sospesa");
+                        size+=n;
+                        if(size>expected)throw new Exception("Il file supera la dimensione del modello ufficiale");
+                        out.write(buffer,0,n);
+                        if(size-last>=4*1024*1024){
+                            report(listener,filename+" · "+(size/1024/1024)+
+                                "/"+(expected/1024/1024)+" MiB",size);
+                            last=size;
+                        }
+                    }
+                }
+                if(size!=expected)throw new Exception("File incompleto: "+size+" byte");
+                report(listener,"Verifico SHA-256 del file importato",size);
+                if(!sha256(staging).equals(hash))
+                    throw new Exception("SHA-256 non valido: seleziona il GGUF ufficiale di Qwen");
+                File target=new File(folder,filename);
+                if(target.exists()&&!target.delete())throw new Exception("Non posso sostituire il modello");
+                if(!staging.renameTo(target))throw new Exception("Installazione GGUF fallita");
+                finish(listener,true,"Modello importato e verificato: "+filename+
+                    (isReady()?". Qwen3-VL pronto per la valutazione offline.":"; importa anche l'altro file GGUF."));
+            }catch(Exception e){
+                finish(listener,false,"Importazione Qwen: "+e.getMessage());
+            }finally{
+                if(staging!=null)staging.delete();
+                busy.set(false);
+            }
+        });
+    }
+
     public void download(Listener listener){
         if(closed)return;
         if(!busy.compareAndSet(false,true)){
