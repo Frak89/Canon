@@ -1,0 +1,211 @@
+#include <jni.h>
+#include <android/log.h>
+#include <atomic>
+#include <algorithm>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <vector>
+#include <memory>
+
+#include "llama.h"
+#include "common.h"
+#include "chat.h"
+#include "mtmd.h"
+#include "mtmd-helper.h"
+#include "ggml-backend.h"
+
+namespace {
+std::mutex inference_lock;
+std::once_flag initialization;
+std::atomic_bool stop_requested{false};
+
+void fail(JNIEnv* env,const std::string& message) {
+    __android_log_print(ANDROID_LOG_ERROR,"AmpyEOS-Qwen","%s",message.c_str());
+    jclass type=env->FindClass("java/lang/IllegalStateException");
+    if(type!=nullptr)env->ThrowNew(type,message.c_str());
+}
+std::string read(JNIEnv* env,jstring str){
+    if(!str)throw std::runtime_error("Missing model path or prompt");
+    const char* data=env->GetStringUTFChars(str,nullptr);
+    if(!data)throw std::runtime_error("Cannot decode JNI string");
+    std::string result(data);
+    env->ReleaseStringUTFChars(str,data);
+    return result;
+}
+jstring utf8(JNIEnv* env,const std::string& str){
+    jbyteArray bytes=env->NewByteArray(static_cast<jsize>(str.size()));
+    if(!bytes)return nullptr;
+    env->SetByteArrayRegion(bytes,0,static_cast<jsize>(str.size()),
+                            reinterpret_cast<const jbyte*>(str.data()));
+    jclass type=env->FindClass("java/lang/String");
+    jmethodID init=env->GetMethodID(type,"<init>","([BLjava/lang/String;)V");
+    jstring charset=env->NewStringUTF("UTF-8");
+    jobject value=env->NewObject(type,init,bytes,charset);
+    env->DeleteLocalRef(bytes);
+    env->DeleteLocalRef(charset);
+    return static_cast<jstring>(value);
+}
+std::vector<uint8_t> to_rgb(JNIEnv* env,jintArray javaPixels,int width,int height){
+    if(width<=0||height<=0||width>2048||height>2048||
+       env->GetArrayLength(javaPixels)!=width*height)
+        throw std::runtime_error("Invalid image dimensions for on-device model");
+    std::vector<jint> argb(static_cast<size_t>(width)*height);
+    env->GetIntArrayRegion(javaPixels,0,width*height,argb.data());
+    std::vector<uint8_t> rgb(argb.size()*3);
+    for(size_t i=0;i<argb.size();i++){
+        const uint32_t p=static_cast<uint32_t>(argb[i]);
+        rgb[i*3+0]=static_cast<uint8_t>((p>>16)&255);
+        rgb[i*3+1]=static_cast<uint8_t>((p>>8)&255);
+        rgb[i*3+2]=static_cast<uint8_t>(p&255);
+    }
+    return rgb;
+}
+std::string token_to_utf8(const llama_vocab* vocabulary,llama_token token){
+    std::vector<char> text(128);
+    int count=llama_token_to_piece(vocabulary,token,text.data(),
+                                   static_cast<int>(text.size()),0,true);
+    if(count<0){
+        text.resize(static_cast<size_t>(-count));
+        count=llama_token_to_piece(vocabulary,token,text.data(),
+                                   static_cast<int>(text.size()),0,true);
+    }
+    if(count<0)throw std::runtime_error("Could not decode Qwen output token");
+    return std::string(text.data(),static_cast<size_t>(count));
+}
+
+struct Session {
+    llama_model* model=nullptr;
+    llama_context* context=nullptr;
+    mtmd_context* vision=nullptr;
+    common_chat_templates_ptr chat;
+    ~Session(){
+        chat.reset();
+        if(vision)mtmd_free(vision);
+        if(context)llama_free(context);
+        if(model)llama_model_free(model);
+    }
+};
+} // namespace
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_ampyeos_canon_NativeQwenVision_cancel(JNIEnv*,jclass) {
+    stop_requested=true;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_ampyeos_canon_NativeQwenVision_process(
+    JNIEnv* env,jclass,jstring javaModel,jstring javaProjector,
+    jintArray javaPixels,jint width,jint height,jstring javaPrompt,jint maxTokens) {
+    std::lock_guard<std::mutex> guard(inference_lock);
+    stop_requested=false;
+    try {
+        std::call_once(initialization, [](){
+            llama_backend_init();
+            ggml_backend_load_all();
+        });
+
+        const std::string modelPath=read(env,javaModel);
+        const std::string projectorPath=read(env,javaProjector);
+        const std::string prompt=read(env,javaPrompt);
+        std::vector<uint8_t> rgb=to_rgb(env,javaPixels,width,height);
+        if(maxTokens<1||maxTokens>1200)
+            throw std::runtime_error("Requested token count outside safety limits");
+
+        Session session;
+        auto params=llama_model_default_params();
+        params.n_gpu_layers=0;
+        session.model=llama_model_load_from_file(modelPath.c_str(),params);
+        if(!session.model)
+            throw std::runtime_error("Cannot load Qwen GGUF. Check model RAM/size.");
+
+        auto contextParams=llama_context_default_params();
+        contextParams.n_ctx=4096;
+        contextParams.n_batch=512;
+        contextParams.n_ubatch=512;
+        contextParams.n_threads=4;
+        contextParams.n_threads_batch=4;
+        session.context=llama_init_from_model(session.model,contextParams);
+        if(!session.context)
+            throw std::runtime_error("Cannot allocate Qwen context on this phone.");
+
+        auto imageParams=mtmd_context_params_default();
+        imageParams.use_gpu=false;
+        imageParams.n_threads=4;
+        imageParams.warmup=false;
+        session.vision=mtmd_init_from_file(projectorPath.c_str(),session.model,imageParams);
+        if(!session.vision||!mtmd_support_vision(session.vision))
+            throw std::runtime_error("The image projector is missing or incompatible.");
+
+        session.chat=common_chat_templates_init(session.model,"");
+        if(!session.chat)
+            throw std::runtime_error("The GGUF has no compatible chat template.");
+
+        mtmd::bitmap image(width,height,rgb.data());
+        if(!image.ptr)
+            throw std::runtime_error("Failed to convert the image for multimodal inference.");
+
+        const std::string marker=mtmd_default_marker();
+        common_chat_msg user;
+        user.role="user";
+        user.content=marker+"\n"+prompt;
+        const std::vector<common_chat_msg> history;
+        const std::string formatted=common_chat_format_single(
+            session.chat.get(),history,user,true,true);
+        auto pos=formatted.find(marker);
+        if(pos==std::string::npos)
+            throw std::runtime_error("Qwen chat template did not preserve the vision marker.");
+
+        const std::string leading=formatted.substr(0,pos);
+        const std::string trailing=formatted.substr(pos+marker.size());
+        mtmd_input_text firstText{leading.data(),leading.size(),false,true};
+        mtmd_input_text lastText{trailing.data(),trailing.size(),false,true};
+        mtmd_input_part leadingPart{&firstText,nullptr};
+        mtmd_input_part picturePart{nullptr,image.ptr.get()};
+        mtmd_input_part trailingPart{&lastText,nullptr};
+        const mtmd_input_part* inputs[]={&leadingPart,&picturePart,&trailingPart};
+        mtmd::input_chunks_ptr chunks(mtmd_input_chunks_init());
+        if(!chunks||mtmd_tokenize_from_parts(session.vision,chunks.get(),inputs,3,true)!=0)
+            throw std::runtime_error("Vision tokens could not be produced.");
+
+        llama_pos next=0;
+        if(mtmd_helper_eval_chunks(session.vision,session.context,chunks.get(),
+                                   0,0,512,true,&next)!=0)
+            throw std::runtime_error("The vision encoder could not evaluate the image.");
+
+        llama_sampler* sampler=llama_sampler_chain_init(
+            llama_sampler_chain_default_params());
+        if(!sampler)throw std::runtime_error("Sampler allocation failed");
+        llama_sampler_chain_add(sampler,llama_sampler_init_top_k(40));
+        llama_sampler_chain_add(sampler,llama_sampler_init_temp(.16f));
+        llama_sampler_chain_add(sampler,llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+
+        llama_batch batch=llama_batch_init(1,0,1);
+        const llama_vocab* vocab=llama_model_get_vocab(session.model);
+        std::string answer;
+        try{
+            for(int n=0;n<maxTokens&&!stop_requested;n++){
+                llama_token token=llama_sampler_sample(sampler,session.context,-1);
+                llama_sampler_accept(sampler,token);
+                if(llama_vocab_is_eog(vocab,token))break;
+                answer+=token_to_utf8(vocab,token);
+                common_batch_clear(batch);
+                common_batch_add(batch,token,next++,{0},true);
+                if(llama_decode(session.context,batch)!=0)
+                    throw std::runtime_error("Qwen token generation stopped unexpectedly");
+            }
+        }catch(...){
+            llama_batch_free(batch);
+            llama_sampler_free(sampler);
+            throw;
+        }
+        llama_batch_free(batch);
+        llama_sampler_free(sampler);
+        if(stop_requested)throw std::runtime_error("Analysis cancelled");
+        if(answer.empty())throw std::runtime_error("Qwen returned no description");
+        return utf8(env,answer);
+    }catch(const std::exception& e){
+        fail(env,e.what());
+        return nullptr;
+    }
+}
