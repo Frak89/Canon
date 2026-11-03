@@ -1,6 +1,19 @@
-# AmpyEOS 0.8.2 — Analisi rapida davvero locale e Qwen con timeout
+# AmpyEOS 0.8.3 — Full Quality / Vulkan GPU / Qwen residente
 
 App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
+
+## Novità v0.8.3 · Niente riduzione imposta, accelerazione vera
+
+- **Qwen3-VL multimodale completo:** rimossa la riduzione aggiuntiva obbligatoria a 224/320/448 pixel all'interno del modulo Qwen, così il motore riceve l'intera bitmap di lavoro dell'editor. Eliminato anche il tetto artificiale sulle patch visive; il modello usa i limiti della propria configurazione.
+- **Vulkan GPU Mali-G710 sul Pixel 7 Pro:** backend ggml Vulkan ARM64 compilato da sorgente; accelerazione tentata per Qwen e per il proiettore visivo mmproj. L'app dichiara se sta usando `GPU Vulkan` oppure `CPU fallback`, senza fingere prestazioni non misurate.
+- **Qwen residente:** modello, contesto e mmproj vengono conservati fra analisi successive nella stessa sessione. Il context KV viene pulito fra fotografie, evitando la ripetuta lettura e inizializzazione dei 1,55 GB di modelli dalla memoria.
+- **Controllo di integrità:** prima di riutilizzare il modello vengono verificati i descrittori dei due GGUF (device, inode, dimensione); la cache viene ricreata se i file cambiano.
+- **Sicurezza e controllo:** possibilità di annullare le elaborazioni, watchdog contro blocchi molto lunghi e fallback CPU se la GPU non si inizializza. Il watchdog segnala un errore anziché diminuire silenziosamente la qualità.
+- **Nessun upload di immagini:** l'inferenza usa i pixel in memoria del telefono, senza server o Termux. I file GGUF restano in `Download/AmpyEOS/Qwen3-VL`.
+
+**Guida tecnica e test hardware:** [docs/AmpyEOS_Rev083_GPU_FullQuality.md](docs/AmpyEOS_Rev083_GPU_FullQuality.md)
+
+**Limite importante:** la bitmap di lavoro caricata inizialmente dall'editor viene ancora campionata per l'interfaccia. La v0.8.3 elimina la *seconda* riduzione dentro Qwen, ma non rappresenta ancora una pipeline completa per elaborare o esportare i RAW Canon alla risoluzione nativa. Inoltre la qualità e velocità GPU devono essere misurate sul Pixel fisico, non inferite dalla compilazione.
 
 ## Novità v0.8.2 · Risposta rapida senza 20 minuti di attesa
 
