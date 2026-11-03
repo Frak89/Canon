@@ -92,20 +92,21 @@ public final class QwenPersistentStore {
         Uri exists=find(name);
         if(exists!=null && length(exists)==expected) return exists;
         Uri target=create(name+".publishing");
-        boolean success=false;
         try(InputStream in=new java.io.FileInputStream(verified);
             ParcelFileDescriptor fd=writable(target);
             FileOutputStream out=new FileOutputStream(fd.getFileDescriptor())) {
             byte[] bytes=new byte[128*1024];long copied=0;int read;
             while((read=in.read(bytes))!=-1){
-                copied+=read;if(copied>expected)throw new IOException("Dimensione modello eccessiva");
+                if(Thread.currentThread().isInterrupted())
+                    throw new IOException("Copia interrotta: il vecchio modello rimane intatto");
+                copied+=read;
+                if(copied>expected)throw new IOException("Dimensione modello eccessiva");
                 out.write(bytes,0,read);
             }
             out.flush();
             if(copied!=expected)throw new IOException("Copia modello non completa");
         }catch(IOException e){discardOwnPartial(target);throw e;}
         finish(target,name);
-        success=true;
         return target;
     }
     public boolean isDownloadLocation(Uri uri){
