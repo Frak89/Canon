@@ -88,7 +88,20 @@ public final class EditorActivity extends Activity {
     private TextView visionStatus;
     private Button qwenReviewButton;
     private QwenModelManager qwenModels;
-    private Button qwenDownloadButton;
+    private Button qwenDownloadButton,qwenStopButton;
+    private boolean qwenAnalyzing=false;
+    private volatile boolean qwenStopRequested=false;
+    private String qwenStage="Preparazione del lavoro sul Pixel";
+    private long qwenStartElapsed=0;
+    private final Runnable qwenTicker=new Runnable(){
+        @Override public void run(){
+            if(closing||!qwenAnalyzing)return;
+            long seconds=Math.max(0,(android.os.SystemClock.elapsedRealtime()-qwenStartElapsed)/1000);
+            visionStatus.setText("QWEN3-VL · "+qwenStage+" · "+seconds+
+                " s trascorsi · 100% sul Pixel, senza connessione");
+            ui.postDelayed(this,3000);
+        }
+    };
     private ColorLooks.Look selectedLook=ColorLooks.Look.NATURALE;
     private volatile boolean closing=false;
     private final String[] steps={"1 · OSSERVA","2 · LUCE","3 · COMPOSIZIONE","4 · COLORE","5 · CONFRONTA"};
@@ -221,6 +234,15 @@ public final class EditorActivity extends Activity {
         });
         qwenReviewButton=button("ANALIZZA QWEN OFFLINE",qwenActions,v->analyzeVision());
         qwenReviewButton.setEnabled(false);
+        qwenStopButton=button("FERMA ANALISI",qwenActions,v->{
+            if(!qwenAnalyzing)return;
+            qwenStopRequested=true;
+            qwenStopButton.setEnabled(false);
+            qwenStage="Annullamento richiesto; l'operazione in corso potrebbe dover terminare";
+            if(NativeQwenVision.available())NativeQwenVision.cancel();
+            visionStatus.setText("QWEN3-VL · "+qwenStage);
+        });
+        qwenStopButton.setEnabled(false);
         caption=txt("Apri una foto oppure confronta più scatti.",13);caption.setTextColor(CYAN);panel.addView(caption);
         report=txt("L'originale non viene mai sovrascritto.",12);panel.addView(report);
         LinearLayout tools=row(panel);
@@ -922,24 +944,44 @@ public final class EditorActivity extends Activity {
                 });
             }).show();
     }
+
     private void analyzeVision(){
         Bitmap source=original;
         if(source==null){visionStatus.setText("Apri una foto da analizzare.");return;}
+        if(qwenAnalyzing){visionStatus.setText("Qwen è già impegnato in un'analisi.");return;}
         if(qwenModels==null||!qwenModels.isReady()){
-            visionStatus.setText("QWEN3-VL · Modello non ancora scaricato. Premi SCARICA QWEN.");
+            visionStatus.setText("QWEN3-VL · Modello non scaricato. Premi SCARICA QWEN.");
             return;
         }
         if(!NativeQwenVision.available()){
             visionStatus.setText("Motore nativo Qwen non disponibile: "+NativeQwenVision.reason());
             return;
         }
+        qwenStopRequested=false;
+        qwenAnalyzing=true;
+        qwenStage="Lavoro in coda, inizializzazione in preparazione";
+        qwenStartElapsed=android.os.SystemClock.elapsedRealtime();
         qwenReviewButton.setEnabled(false);
-        visionStatus.setText("QWEN3-VL · Analisi nel Pixel, SENZA INTERNET. "+
-            "Caricamento dei pesi e valutazione della foto…");
+        qwenStopButton.setEnabled(true);
+        ui.removeCallbacks(qwenTicker);
+        qwenTicker.run();
         worker.execute(()->{
             try{
+                if(qwenStopRequested)
+                    throw new IllegalStateException("Analisi annullata prima dell'avvio");
                 String json=NativeQwenVision.analyze(source,qwenModels,
-                    LocalVisionReviewer.offlinePrompt());
+                    LocalVisionReviewer.offlinePrompt(),
+                    (stage,generated,limit)->{
+                        ui.post(()->{
+                            if(closing||original!=source||!qwenAnalyzing)return;
+                            qwenStage=stage+
+                                (generated>0?" · "+generated+
+                                    " token generati (limite "+limit+")":"");
+                            // Elapsed time is presented by qwenTicker; not a fake percentage.
+                        });
+                    });
+                if(qwenStopRequested)
+                    throw new IllegalStateException("Analisi annullata dall'utente");
                 LocalVisionReviewer.Result result=
                     LocalVisionReviewer.parseOffline(json,"Qwen3-VL 2B (llama.cpp nativo)");
                 ui.post(()->{
@@ -960,14 +1002,20 @@ public final class EditorActivity extends Activity {
             }catch(Throwable e){
                 ui.post(()->{
                     if(closing||original!=source)return;
+                    String reason=e.getMessage()==null?
+                        e.getClass().getSimpleName():e.getMessage();
                     visionStatus.setText("QWEN3-VL LOCALE · "+
-                        (e.getMessage()==null?e.getClass().getSimpleName():e.getMessage()));
+                        (qwenStopRequested?"Analisi annullata":"Errore: "+reason));
                     caption.setText("VALUTAZIONE NON DISPONIBILE · "+
                         "La foto non è stata inviata fuori dal Pixel.");
                 });
             }finally{
                 ui.post(()->{
-                    if(!closing)qwenReviewButton.setEnabled(original!=null);
+                    if(closing)return;
+                    qwenAnalyzing=false;
+                    ui.removeCallbacks(qwenTicker);
+                    qwenStopButton.setEnabled(false);
+                    qwenReviewButton.setEnabled(original!=null);
                 });
             }
         });
@@ -1149,6 +1197,9 @@ public final class EditorActivity extends Activity {
     }
     @Override protected void onDestroy(){
         closing=true;stopAutoLesson();
+        qwenStopRequested=true;
+        qwenAnalyzing=false;
+        ui.removeCallbacks(qwenTicker);
         if(speech!=null){speech.stop();speech.shutdown();}
         if(stillSubject!=null)stillSubject.close();
         if(extraRecognition!=null)extraRecognition.close();
