@@ -29,9 +29,21 @@ public final class AutoOptimizer {
     private AutoOptimizer(){}
     /** Rotate without black corners; a small additional crop is unavoidable. */
     public static Bitmap straighten(Bitmap src,float detectedAngle, float confidence) {
-        if(confidence<.65f || Math.abs(detectedAngle)<.9f || Math.abs(detectedAngle)>6.1f)
+        if(confidence<.65f || Math.abs(detectedAngle)<.75f || Math.abs(detectedAngle)>6.1f)
             return src;
-        float a=-detectedAngle;
+        return rotateAndCrop(src,detectedAngle);
+    }
+
+    /**
+     * User-adjustable roll compensation. Positive tilt means an image line
+     * slopes downward to the right and needs counter-rotation.
+     * Returns a distinct Bitmap only when an adjustment is requested.
+     */
+    public static Bitmap rotateAndCrop(Bitmap src,float tiltDegrees){
+        if(src==null||Math.abs(tiltDegrees)<.09f)return src;
+        if(!Float.isFinite(tiltDegrees)||Math.abs(tiltDegrees)>15f)
+            throw new IllegalArgumentException("Correzione consentita solo tra -15° e +15°");
+        float a=-tiltDegrees;
         int w=src.getWidth(),h=src.getHeight();
         Bitmap out=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
         Canvas canvas=new Canvas(out);
