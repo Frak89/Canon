@@ -28,15 +28,25 @@ public final class NativeQwenVision {
     public static boolean available(){return LOADED;}
     public static String reason(){return LOADED?"Motore nativo disponibile":LOAD_ERROR;}
 
+    /** Progress stages come from the native engine itself, not an estimated percentage. */
+    public interface ProgressListener {
+        void onProgress(String stage,int generatedTokens,int tokenLimit);
+    }
     private static native String process(String modelPath,String projectorPath,
-        int[] pixels,int width,int height,String prompt,int maximumTokens);
+        int[] pixels,int width,int height,String prompt,int maximumTokens,
+        ProgressListener progress);
     public static native void cancel();
 
     public static String analyze(Bitmap image,QwenModelManager models,String prompt)
             throws Exception {
+        return analyze(image,models,prompt,null);
+    }
+    public static String analyze(Bitmap image,QwenModelManager models,String prompt,
+                                 ProgressListener progress) throws Exception {
         if(!LOADED)throw new Exception("Motore nativo llama.cpp non caricato: "+LOAD_ERROR);
         if(!models.isReady())throw new Exception("Scarica prima entrambi i file Qwen3-VL");
-        final int maxEdge=768;
+        // Smaller preview limits CPU and multimodal prefill cost on Tensor G2.
+        final int maxEdge=640;
         Bitmap small=image;
         int longest=Math.max(image.getWidth(),image.getHeight());
         if(longest>maxEdge){
@@ -49,7 +59,7 @@ public final class NativeQwenVision {
             int[] pixels=new int[w*h];
             small.getPixels(pixels,0,w,0,0,w,h);
             return process(models.modelFile().getAbsolutePath(),
-                models.projectorFile().getAbsolutePath(),pixels,w,h,prompt,880);
+                models.projectorFile().getAbsolutePath(),pixels,w,h,prompt,880,progress);
         }finally{
             if(small!=image)small.recycle();
         }
