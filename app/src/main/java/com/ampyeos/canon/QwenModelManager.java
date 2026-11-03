@@ -175,8 +175,11 @@ public final class QwenModelManager {
         File privateModel=new File(legacyFolder,name);
         if(privateModel.isFile()&&privateModel.length()==expected){
             report(listener,"Recupero il modello precedente e lo salvo in Download: "+name,0);
-            if(!sha256(privateModel).equals(pinned))
-                throw new Exception("Il vecchio GGUF è corrotto: "+name);
+            if(!sha256(privateModel).equals(pinned)){
+                report(listener,"Vecchia copia privata non valida: "+name+
+                    ". Non la uso e non la cancello automaticamente.",0);
+                return new Source(null,false);
+            }
             try {
                 Uri publicCopy=shared.publish(privateModel,name,expected);
                 if(validate(publicCopy,expected,pinned,listener)){
