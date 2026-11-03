@@ -22,8 +22,8 @@ android {
         externalNativeBuild {
             cmake { cppFlags += listOf("-O2", "-std=c++17") }
         }
-        versionCode = 15
-        versionName = "0.8.2"
+        versionCode = 16
+        versionName = "0.8.3"
     }
     signingConfigs {
         if (hasPersistentSigning) {
