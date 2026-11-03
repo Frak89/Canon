@@ -83,70 +83,10 @@ public final class LocalVisionReviewer {
     private LocalVisionReviewer(){}
 
     /** Only an on-phone loopback server. Never send photos off-device. */
+    @Deprecated
     public static Result inspect(Bitmap original,int port) throws Exception {
-        if(original==null)throw new IOException("Foto non disponibile");
-        if(port<1024||port>65535)throw new IOException("Porta non consentita");
-        URL modelsUrl=new URL("http://127.0.0.1:"+port+"/v1/models");
-        JSONObject models=get(modelsUrl);
-        JSONArray data=models.optJSONArray("data");
-        if(data==null||data.length()==0)
-            throw new IOException("Server avviato senza modelli. Carica Qwen3-VL e mmproj.");
-        JSONObject entry=data.optJSONObject(0);
-        String model=entry==null?"":entry.optString("id","");
-        if(model.isEmpty())throw new IOException("Nessun identificativo modello disponibile");
-
-        int maxSide=1000;
-        Bitmap reduced=original;
-        int originalMax=Math.max(original.getWidth(),original.getHeight());
-        if(originalMax>maxSide){
-            float k=maxSide/(float)originalMax;
-            reduced=Bitmap.createScaledBitmap(original,
-                Math.max(1,Math.round(original.getWidth()*k)),
-                Math.max(1,Math.round(original.getHeight()*k)),true);
-        }
-        ByteArrayOutputStream imageBytes=new ByteArrayOutputStream(250_000);
-        try {
-            if(!reduced.compress(Bitmap.CompressFormat.JPEG,85,imageBytes))
-                throw new IOException("Impossibile codificare il fotogramma JPEG");
-        }finally{if(reduced!=original)reduced.recycle();}
-        String base64=Base64.encodeToString(imageBytes.toByteArray(),Base64.NO_WRAP);
-
-        JSONArray content=new JSONArray();
-        content.put(new JSONObject().put("type","text").put("text",PROMPT));
-        content.put(new JSONObject().put("type","image_url").put("image_url",
-            new JSONObject().put("url","data:image/jpeg;base64,"+base64)));
-        JSONObject req=new JSONObject();
-        req.put("model",model);
-        req.put("messages",new JSONArray().put(
-            new JSONObject().put("role","user").put("content",content)));
-        req.put("temperature",0.15);
-        req.put("max_tokens",1100);
-        req.put("stream",false);
-        req.put("response_format",new JSONObject().put("type","json_object"));
-        JSONObject response=post(
-            new URL("http://127.0.0.1:"+port+"/v1/chat/completions"),req);
-        JSONArray choices=response.optJSONArray("choices");
-        if(choices==null||choices.length()==0)
-            throw new IOException("Il modello non ha prodotto alcuna analisi");
-        String raw=choices.getJSONObject(0).getJSONObject("message").optString("content","");
-        int start=raw.indexOf('{'),end=raw.lastIndexOf('}');
-        if(start<0||end<=start)throw new IOException(
-            "Il modello non ha restituito il JSON fotografico richiesto");
-        JSONObject json=new JSONObject(raw.substring(start,end+1));
-        String subject=required(json,"subject");
-        String scene=required(json,"scene");
-        String composition=required(json,"composition");
-        String why=required(json,"why");
-        if(subject.length()<3||scene.length()<12||composition.length()<12||why.length()<15)
-            throw new IOException("Analisi troppo superficiale: valutazione rifiutata");
-        boolean meaningful=json.optBoolean("meaningful",false);
-        int score=json.optInt("score",0);
-        // Fail-closed: a random number or incomplete scene cannot create a score.
-        if(!meaningful)score=0;
-        return new Result(meaningful,score,subject,scene,composition,
-            optional(json,"light"),optional(json,"color"),optional(json,"strengths"),
-            optional(json,"problems"),optional(json,"changes"),optional(json,"reshoot"),
-            why,optional(json,"uncertainty"),model);
+        // Privacy lock: on-device JNI is now the only approved vision path.
+        throw new IOException("Analisi HTTP disabilitata. Usa Qwen3-VL nativo sul Pixel.");
     }
 
     /** Prompt is consumed directly by the JNI engine, without any HTTP request. */
