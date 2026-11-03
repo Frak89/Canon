@@ -124,6 +124,71 @@ public final class EditorActivity extends Activity {
         p.setMargins(dp(3),dp(2),dp(3),dp(2));row.addView(b,p);
         return b;
     }
+
+    /**
+     * Compact collapsible sections replace the previous long horizontal
+     * command rail. The header is always reachable by TalkBack and touch.
+     */
+    private LinearLayout section(LinearLayout parent,String name,boolean expanded){
+        LinearLayout group=new LinearLayout(this);
+        group.setOrientation(LinearLayout.VERTICAL);
+        group.setBackgroundColor(0xff101d2b);
+        LinearLayout.LayoutParams wrapper=new LinearLayout.LayoutParams(-1,-2);
+        wrapper.setMargins(dp(4),dp(5),dp(4),dp(5));
+        parent.addView(group,wrapper);
+        TextView head=txt("",14);
+        head.setTextColor(0xffc6f8ed);
+        head.setBackgroundColor(0xff203548);
+        head.setPadding(dp(12),dp(12),dp(8),dp(12));
+        group.addView(head,new LinearLayout.LayoutParams(-1,dp(50)));
+        LinearLayout contents=new LinearLayout(this);
+        contents.setOrientation(LinearLayout.VERTICAL);
+        contents.setPadding(dp(4),dp(4),dp(4),dp(6));
+        group.addView(contents);
+        contents.setTag(head);
+        head.setTag(name);
+        head.setOnClickListener(v->openSection(contents,
+            contents.getVisibility()!=View.VISIBLE));
+        openSection(contents,expanded);
+        return contents;
+    }
+    private void openSection(LinearLayout contents,boolean open){
+        contents.setVisibility(open?View.VISIBLE:View.GONE);
+        TextView header=(TextView)contents.getTag();
+        String label=(String)header.getTag();
+        header.setText((open?"▾ ":"▸ ")+label);
+        header.setContentDescription(label+(open?", aperto":", chiuso")+
+            ". Tocca per "+(open?"chiudere":"aprire"));
+    }
+    private LinearLayout paired(LinearLayout parent){
+        LinearLayout pair=new LinearLayout(this);
+        pair.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);
+        lp.setMargins(dp(1),dp(2),dp(1),dp(2));
+        parent.addView(pair,lp);return pair;
+    }
+    private Button gridAction(String name,LinearLayout pair,View.OnClickListener listener){
+        Button button=AmpyButtons.action(this,name);
+        button.setTextSize(11);
+        button.setOnClickListener(listener);
+        LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(0,dp(59),1);
+        params.setMargins(dp(3),dp(2),dp(3),dp(2));pair.addView(button,params);
+        return button;
+    }
+    private Button gridPhoto(String name,LinearLayout pair,View.OnClickListener listener){
+        Button button=gridAction(name,pair,listener);
+        needsPhoto.add(button);
+        button.setEnabled(original!=null);
+        return button;
+    }
+    private Button gridToggle(String name,boolean on,LinearLayout pair,
+                              View.OnClickListener listener){
+        Button button=AmpyButtons.toggle(this,name,on);
+        button.setTextSize(11);button.setOnClickListener(listener);
+        LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(0,dp(59),1);
+        params.setMargins(dp(3),dp(2),dp(3),dp(2));
+        pair.addView(button,params);return button;
+    }
     private Button actionPhoto(String name,LinearLayout row,View.OnClickListener listener){
         Button b=button(name,row,listener);
         needsPhoto.add(b);
