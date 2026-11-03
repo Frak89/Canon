@@ -1,6 +1,33 @@
-# AmpyEOS 0.5.3 — Verified Streaming Model Extraction
+# AmpyEOS 0.6.0 — Vision-Language Photographic Critique
 
 App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
+
+## Rev0.6 · Basta voti artistici inventati
+
+- **Eliminato 9/10 automatico** da luminosità, ombre o microcontrasto:
+  ora quello è solo un indice **diagnostico tonale**, non una valutazione
+  della qualità della foto, del soggetto o dell'intenzione.
+- **Qwen3-VL** nell'editor: analizza i pixel dell'intera fotografia
+  con un modello realmente multimodale, chiede soggetti, relazioni,
+  composizione, luce, colore, problemi e verdetto motivato.
+- **Fallimento esplicito** quando il modello locale non è avviato,
+  non è visivo o restituisce un'analisi insufficiente: in questo caso
+  il voto resta **Non valutata** e non viene simulato.
+- Confronto delle versioni elaborate: `AutoMasterEngine` usa soltanto
+  indicatori di resa tecnica e non pubblica più voti 1–10 fittizi.
+- **Qwen-VL eseguito sul Pixel in Termux** con un vero modello GGUF
+  + proiettore visivo mmproj e un server locale `127.0.0.1:8080`.
+  La fotografia non viene inviata su Internet.
+- **MUSIQ tramite ONNX Runtime**: modello appreso per qualità percettiva
+  sperimentale, **separato** dal significato fotografico; serve importare
+  i file modello e verificarne la compatibilità.
+- [Setup Qwen-VL e limitazioni](docs/Qwen3-VL-setup.md).
+  [Script Termux](scripts/ampyeos_qwen_termux.sh).
+
+**Stato:** APK e client potranno essere compilati in CI; il runtime
+Qwen-VL non è incluso nell'APK e non è stato ancora verificato
+fisicamente sul Pixel. Il confronto artistico non deve essere dichiarato
+affidabile senza una prova sulla scena reale.
 
 ## Novità v0.5.3 · Correzione dell'estrazione TAR del modello AI
 
