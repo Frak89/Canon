@@ -80,6 +80,10 @@ public final class QwenModelManager {
     public boolean isReady(){
         return (modelUri!=null||modelLegacy)&&(projectorUri!=null||projectorLegacy);
     }
+    /** True only after both verified files are available outside the private cache. */
+    public boolean isPersistent(){
+        return isReady() && !modelLegacy && !projectorLegacy;
+    }
     public boolean isWorking(){return busy.get();}
     public String state(){
         if(isReady()){
