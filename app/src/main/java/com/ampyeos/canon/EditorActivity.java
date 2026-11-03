@@ -349,7 +349,7 @@ public final class EditorActivity extends Activity {
         LinearLayout analysisPair=paired(aiSection);
         qwenQuickButton=gridPhoto("ANALISI RAPIDA LOCALE",analysisPair,
             v->analyzeFastLocal());
-        qwenReviewButton=gridPhoto("QWEN PROFONDO · MAX 60s",analysisPair,
+        qwenReviewButton=gridPhoto("QWEN PROFONDO · FULL QUALITY",analysisPair,
             v->analyzeVision());
         LinearLayout comparePair=paired(aiSection);
         qwenCompareButton=gridPhoto("CONFRONTA ORIGINALE / EDIT",comparePair,
@@ -1334,9 +1334,13 @@ public final class EditorActivity extends Activity {
         final String mode=compare?"CONFRONTO FOTO":quick?"ANALISI RAPIDA":"ANALISI PROFONDA";
         // Tensor G2: vision encoder CPU-only. Keep patch count and prefill
         // substantially lower than the original 640/768px no-limit version.
-        final int edge=compare?384:quick?224:320;
-        final int tokenLimit=compare?650:quick?500:880;
-        final int timeBudget=60; // Native CPU timeout; no 20-minute analysis.
+        // Pass the full in-memory photograph to Qwen, no 224/320px shrink.
+        // Accelerated Vulkan vision and cached weights should address latency.
+        final int edge=0;
+        final int tokenLimit=compare?1000:1100;
+        // A watchdog prevents indefinite failures, but does not reduce pixel
+        // resolution, image tokens, scene detail or output quality.
+        final int timeBudget=180;
         qwenStopRequested=false;
         qwenDeadlineIssued=false;
         qwenMaxSeconds=timeBudget;
@@ -1424,7 +1428,7 @@ public final class EditorActivity extends Activity {
                     String reason=e.getMessage()==null?
                         e.getClass().getSimpleName():e.getMessage();
                     visionStatus.setText("QWEN · "+(qwenDeadlineIssued?
-                        "Encoder troppo lento sul Pixel: limite di "+timeBudget+" s superato.":
+                        "Encoder non completato entro il limite di sicurezza di "+timeBudget+" s superato.":
                         qwenStopRequested?"Analisi annullata":"Errore: "+reason));
                     caption.setText("QWEN: nessun verdetto affidabile. "+
                         "MUSIQ e analisi tecnica restano disponibili offline. "+
