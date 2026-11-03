@@ -1,6 +1,22 @@
-# AmpyEOS 0.6.0 — Vision-Language Photographic Critique
+# AmpyEOS 0.7.0 — Qwen3-VL nativo, foto private sul Pixel
 
 App Android per Pixel 7 Pro e assistente remoto Canon EOS R6 Mark II.
+
+## Rev0.7 — Modello visivo serio, completamente dentro l'APK
+
+**Novità:** Qwen3-VL 2B Instruct (GGUF Q4_K_M) con proiettore visivo Q8_0 viene elaborato da **llama.cpp + libmtmd compilati come libreria JNI ARM64**. Non devi inviare immagini a server esterni, a un PC o a Termux. Le vecchie API HTTP di analisi fotografica sono disabilitate.
+
+In `EDIT / AULA` usa:
+- **SCARICA QWEN 2B (1,55 GB)** — download esplicito degli unici due modelli necessari da Hugging Face, ripresa su 4G/5G o Wi-Fi, hash SHA-256 verificati
+- **IMPORTA GGUF DA DOWNLOAD** — scegli manualmente entrambi i file ufficiali dalla cartella Download del Pixel
+- **SOSPENDI DOWNLOAD** — interrompe senza perdere file parziali
+- **ANALIZZA QWEN OFFLINE** — passa direttamente i pixel al motore JNI e visualizza una critica con soggetto, composizione, luce e miglioramenti, senza HTTP
+
+Non esiste più una configurazione di server locale obbligatoria per questa modalità. L'interfaccia continua a non attribuire voti artistici dai soli istogrammi o da MobileNet. In caso di errore del runtime o descrizione insufficiente, il voto rimane **non valutabile**.
+
+**Guida privacy, pesi, dimensioni, memoria e limiti:** [docs/AmpyEOS_Rev07_Private_Vision.md](docs/AmpyEOS_Rev07_Private_Vision.md)
+
+**Stato:** l'APK viene compilato da GitHub Actions anche con il codice nativo llama.cpp. Inference reale, qualità delle valutazioni, consumo RAM e termico devono ancora essere testati sul Pixel 7 Pro.
 
 ## Rev0.6 · Basta voti artistici inventati
 
