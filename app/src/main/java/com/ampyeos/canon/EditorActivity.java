@@ -87,7 +87,8 @@ public final class EditorActivity extends Activity {
     private LocalVisionReviewer.Result visionResult;
     private TextView visionStatus;
     private Button qwenReviewButton;
-    private int visionPort=LocalVisionReviewer.DEFAULT_PORT;
+    private QwenModelManager qwenModels;
+    private Button qwenDownloadButton;
     private ColorLooks.Look selectedLook=ColorLooks.Look.NATURALE;
     private volatile boolean closing=false;
     private final String[] steps={"1 · OSSERVA","2 · LUCE","3 · COMPOSIZIONE","4 · COLORE","5 · CONFRONTA"};
@@ -208,12 +209,16 @@ public final class EditorActivity extends Activity {
                 "Qwen .gguf non è compatibile con questo motore: "+
                 "servirà un runtime Vision-Language separato.")
             .setPositiveButton("OK",null).show());
-        visionPort=getPreferences(MODE_PRIVATE).getInt("vision_port",LocalVisionReviewer.DEFAULT_PORT);
-        visionStatus=txt("QWEN-VL · Non connesso. Il voto artistico richiede un modello visivo reale.",12);
+        qwenModels=new QwenModelManager(this);
+        visionStatus=txt("QWEN3-VL · SOLO PIXEL · "+qwenModels.state()+
+            " · Nessuna fotografia trasferita alla rete.",12);
         visionStatus.setTextColor(0xffefcc98);panel.addView(visionStatus);
         LinearLayout qwenActions=row(panel);
-        button("CONFIGURA QWEN-VL",qwenActions,v->configureVision());
-        qwenReviewButton=button("ANALIZZA SCENA CON QWEN-VL",qwenActions,v->analyzeVision());
+        qwenDownloadButton=button("SCARICA QWEN 2B (1,55 GB)",qwenActions,v->downloadQwen());
+        button("SOSPENDI DOWNLOAD",qwenActions,v->{
+            if(qwenModels!=null)qwenModels.cancel();
+        });
+        qwenReviewButton=button("ANALIZZA QWEN OFFLINE",qwenActions,v->analyzeVision());
         qwenReviewButton.setEnabled(false);
         caption=txt("Apri una foto oppure confronta più scatti.",13);caption.setTextColor(CYAN);panel.addView(caption);
         report=txt("L'originale non viene mai sovrascritto.",12);panel.addView(report);
@@ -855,64 +860,81 @@ public final class EditorActivity extends Activity {
     }
 
 
-    private void configureVision(){
-        EditText port=new EditText(this);
-        port.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        port.setText(String.valueOf(visionPort));
-        port.setSelectAllOnFocus(true);
+
+    private void downloadQwen(){
+        if(qwenModels==null)return;
         new AlertDialog.Builder(this)
-            .setTitle("Qwen3-VL · server locale sul Pixel")
-            .setMessage("Inserisci la porta di llama-server avviato sullo STESSO Pixel "+
-                "(ad esempio da Termux). Le foto vengono inviate esclusivamente a "+
-                "127.0.0.1, mai a server esterni. Modello Qwen-VL + mmproj necessari. "+
-                "Il GGUF testuale da solo non legge immagini.")
-            .setView(port)
-            .setPositiveButton("SALVA",(dialog,n)->{
-                try{
-                    int value=Integer.parseInt(port.getText().toString().trim());
-                    if(value<1024||value>65535)throw new NumberFormatException();
-                    visionPort=value;
-                    getPreferences(MODE_PRIVATE).edit().putInt("vision_port",value).apply();
-                    visionStatus.setText("QWEN-VL · Porta locale "+value+
-                        ". Premi ANALIZZA SCENA per verificare il server e la fotografia.");
-                }catch(Exception e){visionStatus.setText(
-                    "Porta non valida: usa un numero compreso tra 1024 e 65535.");}
-            })
-            .setNegativeButton("ANNULLA",null).show();
+            .setTitle("Qwen3-VL 2B · Modello fotografico sul Pixel")
+            .setMessage("Scarico da Hugging Face i GGUF ufficiali Q4_K_M e mmproj Q8_0 "+
+                "(circa 1,55 GB). Puoi usare Wi-Fi o 4G/5G, ma sulla rete mobile "+
+                "consumerai traffico dati. È possibile riprendere il trasferimento "+
+                "se si interrompe. I due file saranno verificati con SHA-256 "+
+                "prima dell'uso. NON vengono caricate fotografie sulla rete. "+
+                "Il motore llama.cpp è integrato nell'app, non serve Termux.")
+            .setNegativeButton("ANNULLA",null)
+            .setPositiveButton("SCARICA SUL PIXEL",(dialog,which)->{
+                qwenDownloadButton.setEnabled(false);
+                visionStatus.setText("Qwen3-VL · Download sul telefono in corso…");
+                qwenModels.download(new QwenModelManager.Listener(){
+                    @Override public void onProgress(String message,long current,long total){
+                        if(!closing)visionStatus.setText("QWEN3-VL · "+message);
+                    }
+                    @Override public void onComplete(boolean success,String message){
+                        if(closing)return;
+                        visionStatus.setText("QWEN3-VL · "+message);
+                        qwenDownloadButton.setEnabled(true);
+                        updateButtonAvailability();
+                    }
+                });
+            }).show();
     }
     private void analyzeVision(){
         Bitmap source=original;
-        if(source==null){visionStatus.setText("Prima apri una fotografia.");return;}
+        if(source==null){visionStatus.setText("Apri una foto da analizzare.");return;}
+        if(qwenModels==null||!qwenModels.isReady()){
+            visionStatus.setText("QWEN3-VL · Modello non ancora scaricato. Premi SCARICA QWEN.");
+            return;
+        }
+        if(!NativeQwenVision.available()){
+            visionStatus.setText("Motore nativo Qwen non disponibile: "+NativeQwenVision.reason());
+            return;
+        }
         qwenReviewButton.setEnabled(false);
-        visionStatus.setText("QWEN-VL · Invio immagine al modello sullo STESSO Pixel; "+
-            "analisi semantica in corso…");
-        final int port=visionPort;
+        visionStatus.setText("QWEN3-VL · Analisi nel Pixel, SENZA INTERNET. "+
+            "Caricamento dei pesi e valutazione della foto…");
         worker.execute(()->{
             try{
-                LocalVisionReviewer.Result result=LocalVisionReviewer.inspect(source,port);
+                String json=NativeQwenVision.analyze(source,qwenModels,
+                    LocalVisionReviewer.offlinePrompt());
+                LocalVisionReviewer.Result result=
+                    LocalVisionReviewer.parseOffline(json,"Qwen3-VL 2B (llama.cpp nativo)");
                 ui.post(()->{
                     if(closing||original!=source)return;
                     visionResult=result;
-                    visionStatus.setText("QWEN-VL · "+result.scoreLabel()+" · "+
-                        result.subject);
+                    visionStatus.setText("QWEN3-VL LOCALE · "+result.scoreLabel()+
+                        " · "+result.subject);
                     subjectDescription=result.subject;
                     subjectExplanation=result.scene+" "+result.composition;
                     String description=result.narrative();
                     report.setText(description);
-                    caption.setText("VERDETTO QWEN-VL: "+result.scoreLabel());
-                    teacher.setText("MAESTRO QWEN-VL · "+description);
+                    caption.setText("VERDETTO QWEN LOCALE: "+result.scoreLabel());
+                    teacher.setText("MAESTRO QWEN LOCALE · "+description);
                     if(voice)say("Analisi del soggetto: "+result.subject+
                         ". "+result.scene+". "+result.composition+
                         ". Verdetto: "+result.scoreLabel()+". "+result.why);
                 });
-            }catch(Exception e){
-                ui.post(()->{if(!closing){
-                    visionStatus.setText("QWEN-VL NON DISPONIBILE: "+e.getMessage());
-                    caption.setText("VOTO ARTISTICO: NON VALUTATO · "+
-                        "Avvia un server multimodale Qwen3-VL sul Pixel.");
-                }});
+            }catch(Throwable e){
+                ui.post(()->{
+                    if(closing||original!=source)return;
+                    visionStatus.setText("QWEN3-VL LOCALE · "+
+                        (e.getMessage()==null?e.getClass().getSimpleName():e.getMessage()));
+                    caption.setText("VALUTAZIONE NON DISPONIBILE · "+
+                        "La foto non è stata inviata fuori dal Pixel.");
+                });
             }finally{
-                ui.post(()->{if(!closing)qwenReviewButton.setEnabled(original!=null);});
+                ui.post(()->{
+                    if(!closing)qwenReviewButton.setEnabled(original!=null);
+                });
             }
         });
     }
@@ -1096,6 +1118,9 @@ public final class EditorActivity extends Activity {
         if(speech!=null){speech.stop();speech.shutdown();}
         if(stillSubject!=null)stillSubject.close();
         if(extraRecognition!=null)extraRecognition.close();
+        if(qwenModels!=null)qwenModels.close();
+        // Stop an active native decode before Activity resources disappear.
+        if(NativeQwenVision.available())NativeQwenVision.cancel();
         worker.shutdownNow();
         super.onDestroy();
     }
