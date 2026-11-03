@@ -133,19 +133,52 @@ public final class QwenModelManager {
             }finally{busy.set(false);}
         });
     }
+    /**
+     * A valid URI alone is not enough: llama.cpp requires REAL, seekable
+     * GGUF file descriptors, not a cloud-provider pipe or inaccessible URI.
+     */
+    private static void checkNativeFile(ParcelFileDescriptor fd,long expected,
+                                        String name)throws Exception{
+        android.system.StructStat stat=android.system.Os.fstat(fd.getFileDescriptor());
+        if(stat.st_size!=expected)
+            throw new java.io.IOException(name+" non caricabile dal motore Qwen. "+
+                "Il provider ha restituito "+stat.st_size+" byte (attesi "+expected+
+                "). Seleziona il GGUF locale nella cartella Download, non un link cloud.");
+        byte[] magic=new byte[4];
+        int read=android.system.Os.pread(fd.getFileDescriptor(),magic,0,4,0);
+        if(read!=4||magic[0]!='G'||magic[1]!='G'||magic[2]!='U'||magic[3]!='F')
+            throw new java.io.IOException(name+" non è un file GGUF completo e leggibile.");
+    }
     public QwenPersistentStore.OpenModels openForInference()throws Exception {
-        if(!isReady())throw new Exception("Qwen non verificato: apri la sezione modelli");
+        if(!isReady())throw new Exception("Modello non verificato: apri MODELLI IA "+
+            "e controlla i due file in Download.");
         ParcelFileDescriptor lang=modelUri!=null?
             shared.descriptor(modelUri):
             ParcelFileDescriptor.open(modelFile(),ParcelFileDescriptor.MODE_READ_ONLY);
         try{
+            checkNativeFile(lang,MODEL_SIZE,"Modello Qwen");
             ParcelFileDescriptor vision=projectorUri!=null?
                 shared.descriptor(projectorUri):
                 ParcelFileDescriptor.open(projectorFile(),ParcelFileDescriptor.MODE_READ_ONLY);
-            return new QwenPersistentStore.OpenModels(lang,vision);
+            try{
+                checkNativeFile(vision,PROJECTOR_SIZE,"Proiettore visivo mmproj");
+                return new QwenPersistentStore.OpenModels(lang,vision);
+            }catch(Exception e){
+                vision.close();
+                throw e;
+            }
         }catch(Exception e){
             lang.close();
             throw e;
+        }
+    }
+    /** Fast local loader preflight: no network and no vision inference. */
+    public String loaderTest()throws Exception {
+        try(QwenPersistentStore.OpenModels descriptors=openForInference()){
+            return "OK · Qwen GGUF "+(MODEL_SIZE/1048576)+" MiB e mmproj "+
+                (PROJECTOR_SIZE/1048576)+" MiB. Entrambi accessibili, con "+
+                "dimensioni corrette e lettura casuale supportata. "+
+                "llama.cpp può tentare il caricamento nativo (non ancora testato qui).";
         }
     }
     private static final class Source {
