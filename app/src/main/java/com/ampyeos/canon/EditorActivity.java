@@ -48,7 +48,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * fully visual 5-step lessons and export of a new JPEG copy to MediaStore.
  */
 public final class EditorActivity extends Activity {
-    private static final int PICK=1, PICK_GROUP=2, PICK_MODEL=3, PICK_MUSIQ=4, CYAN=0xff43eadb, BG=0xff080f1a;
+    private static final int PICK=1, PICK_GROUP=2, PICK_MODEL=3, PICK_MUSIQ=4, PICK_QWEN=5, CYAN=0xff43eadb, BG=0xff080f1a;
     private final Handler ui=new Handler(Looper.getMainLooper());
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final AtomicInteger generation=new AtomicInteger();
@@ -215,6 +215,7 @@ public final class EditorActivity extends Activity {
         visionStatus.setTextColor(0xffefcc98);panel.addView(visionStatus);
         LinearLayout qwenActions=row(panel);
         qwenDownloadButton=button("SCARICA QWEN 2B (1,55 GB)",qwenActions,v->downloadQwen());
+        button("IMPORTA GGUF DA DOWNLOAD",qwenActions,v->pickQwen());
         button("SOSPENDI DOWNLOAD",qwenActions,v->{
             if(qwenModels!=null)qwenModels.cancel();
         });
@@ -321,6 +322,10 @@ public final class EditorActivity extends Activity {
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
         if(result!=RESULT_OK||data==null)return;
+        if(request==PICK_QWEN&&data.getData()!=null){
+            importQwen(data.getData());
+            return;
+        }
         if(request==PICK_MUSIQ&&data.getData()!=null){
             importMusiq(data.getData());
             return;
@@ -860,6 +865,35 @@ public final class EditorActivity extends Activity {
     }
 
 
+
+
+    private void pickQwen(){
+        new AlertDialog.Builder(this)
+            .setTitle("Importa Qwen3-VL offline")
+            .setMessage("Se hai già scaricato i modelli nella cartella Download, "+
+                "scegli prima il GGUF Q4_K_M (1,11 GB) e poi ripeti per il "+
+                "proiettore mmproj Q8_0 (445 MB). "+
+                "Ogni file viene verificato con SHA-256. Nessuna fotografia "+
+                "verrà inviata fuori dal Pixel.")
+            .setPositiveButton("SCEGLI FILE",(d,w)->{
+                Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.setType("*/*");
+                startActivityForResult(i,PICK_QWEN);
+            })
+            .setNegativeButton("ANNULLA",null).show();
+    }
+    private void importQwen(Uri uri){
+        visionStatus.setText("Qwen3-VL · Importazione modello dalla memoria Android…");
+        qwenModels.importFile(uri,new QwenModelManager.Listener(){
+            @Override public void onProgress(String message,long bytes,long total){
+                if(!closing)visionStatus.setText("Qwen3-VL · "+message);
+            }
+            @Override public void onComplete(boolean success,String message){
+                if(!closing)visionStatus.setText("Qwen3-VL · "+message);
+            }
+        });
+    }
 
     private void downloadQwen(){
         if(qwenModels==null)return;
