@@ -78,6 +78,7 @@ public final class EditorActivity extends Activity {
     private Spinner looks;
     private SeekBar brightness,contrast,saturation;
     private TextView caption,report,teacher,stepInfo;
+    private LinearLayout resultsSection;
     private boolean before=false, voice=false, playing=true;
     private Button beforeButton,comparisonButton,overlayButton,playButton,voiceButton,autoLessonButton;
     private Button applyCropButton,versionsButton;
@@ -328,7 +329,7 @@ public final class EditorActivity extends Activity {
         gridAction("DIAGNOSTICA QWEN",assessmentPair,v->showQwenDiagnostics());
 
         // A long explanation no longer hides the editing controls on opening.
-        LinearLayout resultsSection=section(panel,"03  RISULTATO & SPIEGAZIONE",false);
+        resultsSection=section(panel,"03  RISULTATO & SPIEGAZIONE",false);
         report=txt("L'originale non viene sovrascritto. Premi qui sopra per "+
             "leggere le analisi e le motivazioni fotografiche.",12);
         resultsSection.addView(report);
@@ -362,8 +363,10 @@ public final class EditorActivity extends Activity {
         overlayButton.setEnabled(false);needsPhoto.add(overlayButton);
         gridPhoto("SPIEGA LE MODIFICHE",edit7,v->explain());
         LinearLayout edit8=paired(studio);
-        gridAction("CLASSIFICA PARAMETRI TECNICI",edit8,v->pick(true));
+        gridPhoto("CORREZIONE FINE ±10°",edit8,v->manualStraighten());
         gridPhoto("RICONOSCIMENTO EXTRA",edit8,v->runExtraRecognition(false));
+        LinearLayout edit9=paired(studio);
+        gridAction("CLASSIFICA PARAMETRI TECNICI",edit9,v->pick(true));
 
         // 05. Manual looks, exposure, contrast and saturation.
         LinearLayout lookSection=section(panel,"05  COLOR LAB · REGOLAZIONI FINI",false);
@@ -698,17 +701,23 @@ public final class EditorActivity extends Activity {
                             runExtraRecognition(true);
                         }
                     }));
-                    selectedLook=r.look.look;
-                    looks.setSelection(selectedLook.ordinal());
+                    // Import should not silently change the photograph's colors.
+                    selectedLook=ColorLooks.Look.NATURALE;
+                    looks.setSelection(ColorLooks.Look.NATURALE.ordinal());
                     brightness.setProgress(100);contrast.setProgress(100);saturation.setProgress(100);
                     before=false;crop.setBitmapSize(b.getWidth(),b.getHeight());
                     crop.setCropEnabled(false);crop.setAspect(0);
                     lesson.configure(b.getWidth(),b.getHeight(),r.suggestedCrop);
-                    caption.setText("FOTOGRAFIA: NON ANCORA VALUTATA · "+
-                        "Qwen per soggetto e significato; MUSIQ per qualità percettiva.");
+                    caption.setText((doLevel?alignment.summary():
+                        "Auto Raddrizza all'apertura disattivato.")+
+                        "  ·  Nessun voto artistico automatico.");
                     report.setText("DATI VISIVI: "+visual.summary+
                         "\nPERCHÉ: "+r.why+"\nCOME: "+r.how);
-                    refresh();showStep(0);updateButtonAvailability();
+                    // Do NOT show the turquoise classroom grid on every photo.
+                    // The user activates it explicitly in Virtual Classroom.
+                    lesson.setVisibility(View.GONE);
+                    visualOverlay.setVisibility(View.GONE);
+                    refresh();updateButtonAvailability();
                 });
             }catch(Exception e){ui.post(()->caption.setText("Caricamento fallito: "+e.getMessage()));}
         });
@@ -1204,7 +1213,10 @@ public final class EditorActivity extends Activity {
                         throw new IllegalStateException("Nessuna versione elaborata disponibile");
                     composite=VisionComparison.arrange(source,proposal);
                 }
-                Bitmap taskBitmap=compare?composite:source;
+                // The normal critic judges exactly what is shown in the editor,
+                // including any reversible auto-level correction or look.
+                Bitmap taskBitmap=compare?composite:
+                    (proposal!=null?proposal:source);
                 String prompt=compare?VisionComparison.prompt():
                     LocalVisionReviewer.offlinePrompt();
                 String json=NativeQwenVision.analyze(taskBitmap,qwenModels,prompt,
@@ -1227,6 +1239,7 @@ public final class EditorActivity extends Activity {
                         if(closing||original!=source)return;
                         comparisonVerdict=result.asText();
                         report.setText(comparisonVerdict);
+                        openSection(resultsSection,true);
                         caption.setText("QWEN · confronto: "+result.decision);
                         visionStatus.setText("QWEN3-VL · Confronto completato interamente sul Pixel.");
                         teacher.setText("MAESTRO · "+comparisonVerdict);
@@ -1246,6 +1259,7 @@ public final class EditorActivity extends Activity {
                         subjectExplanation=result.scene+" "+result.composition;
                         String description=result.narrative();
                         report.setText(description);
+                        openSection(resultsSection,true);
                         caption.setText("VERDETTO QWEN LOCALE: "+result.scoreLabel());
                         teacher.setText("MAESTRO QWEN LOCALE · "+description);
                         if(voice)say("Soggetto: "+result.subject+". "+result.scene+
