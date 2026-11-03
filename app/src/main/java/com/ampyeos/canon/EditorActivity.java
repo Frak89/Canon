@@ -253,148 +253,218 @@ public final class EditorActivity extends Activity {
         comparison.setVisibility(View.GONE);
         area.addView(comparison,new FrameLayout.LayoutParams(-1,-1));
         ScrollView scroller=new ScrollView(this);
-        root.addView(scroller,new LinearLayout.LayoutParams(-1,dp(370)));
-        LinearLayout panel=new LinearLayout(this);panel.setOrientation(LinearLayout.VERTICAL);
+        scroller.setFillViewport(false);
+        root.addView(scroller,new LinearLayout.LayoutParams(-1,dp(390)));
+        LinearLayout panel=new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(3),dp(2),dp(3),dp(10));
         scroller.addView(panel);
-        TextView legend=txt("MENTA CHIARO = TOGGLE ON · SCURO = OFF/NON DISPONIBILE · BLU = AZIONE",11);
-        legend.setTextColor(0xffb8d5e3);panel.addView(legend);
-        extraRecognition=new ExtraRecognition(this);
-        LinearLayout modelActions=row(panel);
-        extraAiToggle=toggleButton("DOWNLOAD AI AUTOMATICO",extraRecognition.autoEnabled(),
-            modelActions,v->{
-                extraRecognition.setAutoEnabled(!extraRecognition.autoEnabled());
-                AmpyButtons.setToggle(extraAiToggle,extraRecognition.autoEnabled());
-                modelStatus.setText(extraRecognition.autoEnabled()?
-                    "AI EXTRA: download automatico attivo su Wi-Fi "+
-                        (extraRecognition.allowMobileAuto()?"e rete mobile 4G/5G":"(dati mobili disattivati)"):
-                    "AI EXTRA: download automatico disattivato; avvio manuale disponibile");
-            });
-        mobileAiToggle=toggleButton("DATI MOBILI AI",extraRecognition.allowMobileAuto(),
-            modelActions,v->{
-                extraRecognition.setAllowMobileAuto(!extraRecognition.allowMobileAuto());
-                AmpyButtons.setToggle(mobileAiToggle,extraRecognition.allowMobileAuto());
-                modelStatus.setText(extraRecognition.allowMobileAuto()?
-                    "4G/5G consentito per il download automatico AI (escluso roaming). "+
-                    "Il consumo del traffico dipende dal piano dati.":
-                    "Download automatico AI limitato al Wi-Fi. Il download manuale resta possibile.");
-            });
-        modelStatus=txt("AI EXTRA · "+ExtraRecognition.modelName()+
-            " · "+(extraRecognition.isCached()?"modello in cache":
-                "download su Wi-Fi e "+(extraRecognition.allowMobileAuto()?"4G/5G":"dati mobili spenti")),
-            12);
-        modelStatus.setTextColor(0xff8debd2);panel.addView(modelStatus);
-        learnedStatus=txt("MUSIQ · "+LearnedQuality.status(this)+
-            " · qualità percettiva appresa (NON voto artistico)",12);
-        learnedStatus.setTextColor(0xfff2c88f);panel.addView(learnedStatus);
-        LinearLayout localModelRow=row(panel);
-        button("IMPORTA MODELLO DA DOWNLOAD",localModelRow,v->pickModel());
-        button("INFO MODELLI",localModelRow,v->new AlertDialog.Builder(this)
-            .setTitle("Modelli AI compatibili")
-            .setMessage("AmpyEOS usa MobileNetV2 TensorFlow Lite. Puoi scegliere "+
-                "dalla cartella Download il file ufficiale .tgz o il .tflite estratto. "+
-                "Per funzionare offline sono necessarie anche le etichette "+
-                "ImageNetLabels.txt. I file vengono verificati con SHA-256. "+
-                "Qwen .gguf non è compatibile con questo motore: "+
-                "servirà un runtime Vision-Language separato.")
-            .setPositiveButton("OK",null).show());
+        TextView legend=txt("MENTA = ATTIVO  ·  ARDESIA = SPENTO  ·  BLU = AZIONE",10);
+        legend.setTextColor(0xff9bbfc5);
+        panel.addView(legend);
+
+        // 01. Only the actions needed during normal photography stay expanded.
+        autoLevelOnOpen=getPreferences(MODE_PRIVATE)
+            .getBoolean("auto_level_on_open",true);
+        LinearLayout startSection=section(panel,"01  SCATTO & RADDRIZZAMENTO",true);
+        LinearLayout quick1=paired(startSection);
+        gridAction("APRI FOTO",quick1,v->pick(false));
+        autoLevelToggle=gridToggle("AUTO RADDRIZZA APERTURA",autoLevelOnOpen,quick1,v->{
+            autoLevelOnOpen=!autoLevelOnOpen;
+            getPreferences(MODE_PRIVATE).edit()
+                .putBoolean("auto_level_on_open",autoLevelOnOpen).apply();
+            AmpyButtons.setToggle(autoLevelToggle,autoLevelOnOpen);
+            caption.setText(autoLevelOnOpen?
+                "Auto Raddrizza ON: ogni nuova foto viene controllata; niente rotazioni incerte.":
+                "Auto Raddrizza OFF: le nuove foto vengono aperte senza correzioni geometriche.");
+        });
+        LinearLayout quick2=paired(startSection);
+        autoLevelManualButton=gridPhoto("RADDRIZZA ADESSO",quick2,v->autoStraighten());
+        gridPhoto("SALVA COPIA",quick2,v->save());
+        LinearLayout quick3=paired(startSection);
+        gridPhoto("RIPRISTINA ORIGINALE",quick3,v->restore());
+        gridPhoto("ANALISI VISIVA",quick3,v->showAnalysis());
+
+        caption=txt("Apri una foto: orientamento EXIF e raddrizzamento prudente.",13);
+        caption.setTextColor(CYAN);
+        panel.addView(caption);
+
+        // 02. Real scene understanding is separate from pixel metrics.
+        LinearLayout aiSection=section(panel,"02  MAESTRO IA · ANALISI FOTOGRAFICA",true);
         qwenModels=new QwenModelManager(this);
         visionDiagnostics=new VisionDiagnostics(this);
-        visionDiagnostics.add("Editor avviato · motore nativo "+NativeQwenVision.available());
-        visionStatus=txt("QWEN3-VL · SOLO PIXEL · "+qwenModels.state()+
-            " · Nessuna fotografia trasferita alla rete.",12);
-        visionStatus.setTextColor(0xffefcc98);panel.addView(visionStatus);
-        LinearLayout qwenActions=row(panel);
-        qwenDownloadButton=button("SCARICA QWEN 2B (1,55 GB)",qwenActions,v->downloadQwen());
-        button("IMPORTA GGUF DA DOWNLOAD",qwenActions,v->pickQwen());
-        button("SOSPENDI DOWNLOAD",qwenActions,v->{
-            if(qwenModels!=null)qwenModels.cancel();
-        });
-        qwenReviewButton=button("ANALISI PROFONDA QWEN",qwenActions,v->analyzeVision());
-        qwenReviewButton.setEnabled(false);
-        qwenQuickButton=button("ANALISI RAPIDA QWEN",qwenActions,v->startQwen(true,false));
-        qwenQuickButton.setEnabled(false);
-        qwenCompareButton=button("CONFRONTA ORIGINALE / EDIT",qwenActions,v->startQwen(false,true));
-        qwenCompareButton.setEnabled(false);
-        button("DIAGNOSTICA QWEN",qwenActions,v->showQwenDiagnostics());
-        qwenStopButton=button("FERMA ANALISI",qwenActions,v->{
+        visionDiagnostics.add("Editor avviato, motore locale "+NativeQwenVision.available());
+        visionStatus=txt("QWEN3-VL · SOLO PIXEL · "+qwenModels.state(),12);
+        visionStatus.setTextColor(0xffefcc98);
+        aiSection.addView(visionStatus);
+        qwenSpinner=new android.widget.ProgressBar(this,null,
+            android.R.attr.progressBarStyleHorizontal);
+        qwenSpinner.setIndeterminate(true);
+        qwenSpinner.setVisibility(View.GONE);
+        aiSection.addView(qwenSpinner,new LinearLayout.LayoutParams(-1,dp(5)));
+        LinearLayout analysisPair=paired(aiSection);
+        qwenQuickButton=gridPhoto("ANALISI RAPIDA QWEN",analysisPair,
+            v->startQwen(true,false));
+        qwenReviewButton=gridPhoto("ANALISI PROFONDA QWEN",analysisPair,
+            v->analyzeVision());
+        LinearLayout comparePair=paired(aiSection);
+        qwenCompareButton=gridPhoto("CONFRONTA ORIGINALE / EDIT",comparePair,
+            v->startQwen(false,true));
+        qwenStopButton=gridAction("FERMA ANALISI",comparePair,v->{
             if(!qwenAnalyzing)return;
             qwenStopRequested=true;
             qwenStopButton.setEnabled(false);
-            qwenStage="Annullamento richiesto; l'operazione in corso potrebbe dover terminare";
+            qwenStage="Annullamento richiesto; la fase corrente potrebbe dover terminare";
             if(NativeQwenVision.available())NativeQwenVision.cancel();
             visionStatus.setText("QWEN3-VL · "+qwenStage);
         });
         qwenStopButton.setEnabled(false);
-        caption=txt("Apri una foto oppure confronta più scatti.",13);caption.setTextColor(CYAN);panel.addView(caption);
-        report=txt("L'originale non viene mai sovrascritto.",12);panel.addView(report);
-        LinearLayout tools=row(panel);
-        button("APRI FOTO",tools,v->pick(false));
-        button("IMPORTA MUSIQ ONNX",tools,v->pickMusiq());
-        actionPhoto("VALUTA QUALITÀ MUSIQ",tools,v->analyzeMusiq());
-        button("ORDINA PER DATI TECNICI",tools,v->pick(true));
-        actionPhoto("AUTO LOOK TECNICO",tools,v->autoMaster());
-        actionPhoto("AUTO TONO + CROP",tools,v->autoPro());
-        versionsButton=actionPhoto("VERSIONI AI",tools,v->showVersions());
-        versionsButton.setEnabled(false);
-        actionPhoto("AUTO COMPONI",tools,v->autoCompose());
-        actionPhoto("AUTO RADDRIZZA",tools,v->autoStraighten());
-        actionPhoto("AUTO TONI",tools,v->autoTone());
-        actionPhoto("AUTO RESIZE",tools,v->chooseResize());
-        actionPhoto("ANALISI VISIVA",tools,v->showAnalysis());
-        actionPhoto("RICONOSCIMENTO EXTRA",tools,v->runExtraRecognition(false));
-        overlayButton=toggleButton("OVERLAY TECNICO",false,tools,v->toggleTechnicalOverlay());
-        overlayButton.setEnabled(false);
-        needsPhoto.add(overlayButton);
-        actionPhoto("RITAGLIA",tools,v->chooseRatio());
-        applyCropButton=actionPhoto("APPLICA CROP",tools,v->applyCrop());
-        applyCropButton.setEnabled(false);
-        actionPhoto("RUOTA 90°",tools,v->rotate());
-        actionPhoto("SPECCHIO",tools,v->mirror());
-        beforeButton=toggleButton("ORIGINALE",false,tools,v->toggleBefore());
-        beforeButton.setEnabled(false);needsPhoto.add(beforeButton);
-        comparisonButton=toggleButton("SPLIT SCORREVOLE",false,tools,v->toggleComparison());
-        comparisonButton.setEnabled(false);needsPhoto.add(comparisonButton);
-        actionPhoto("SPIEGA",tools,v->explain());
-        actionPhoto("SALVA COPIA",tools,v->save());
-        actionPhoto("RIPRISTINA",tools,v->restore());
+        learnedStatus=txt("MUSIQ · "+LearnedQuality.status(this)+
+            " · qualità percettiva, non voto artistico",12);
+        learnedStatus.setTextColor(0xfff2c88f);
+        aiSection.addView(learnedStatus);
+        LinearLayout assessmentPair=paired(aiSection);
+        gridPhoto("VALUTA QUALITÀ MUSIQ",assessmentPair,v->analyzeMusiq());
+        gridAction("DIAGNOSTICA QWEN",assessmentPair,v->showQwenDiagnostics());
 
-        LinearLayout lookRow=new LinearLayout(this);lookRow.setGravity(Gravity.CENTER_VERTICAL);
+        // A long explanation no longer hides the editing controls on opening.
+        LinearLayout resultsSection=section(panel,"03  RISULTATO & SPIEGAZIONE",false);
+        report=txt("L'originale non viene sovrascritto. Premi qui sopra per "+
+            "leggere le analisi e le motivazioni fotografiche.",12);
+        resultsSection.addView(report);
+
+        // 04. Editing commands are visible as a mobile-sized two-column grid.
+        LinearLayout studio=section(panel,"04  EDITOR · COMPOSIZIONE & ESPORTAZIONE",true);
+        LinearLayout edit1=paired(studio);
+        gridPhoto("AUTO LOOK TECNICO",edit1,v->autoMaster());
+        gridPhoto("AUTO TONO + CROP",edit1,v->autoPro());
+        LinearLayout edit2=paired(studio);
+        versionsButton=gridPhoto("VERSIONI PROPOSTE",edit2,v->showVersions());
+        versionsButton.setEnabled(false);
+        gridPhoto("AUTO COMPONI",edit2,v->autoCompose());
+        LinearLayout edit3=paired(studio);
+        gridPhoto("RITAGLIA",edit3,v->chooseRatio());
+        applyCropButton=gridPhoto("APPLICA RITAGLIO",edit3,v->applyCrop());
+        applyCropButton.setEnabled(false);
+        LinearLayout edit4=paired(studio);
+        gridPhoto("AUTO TONI",edit4,v->autoTone());
+        gridPhoto("AUTO RESIZE",edit4,v->chooseResize());
+        LinearLayout edit5=paired(studio);
+        gridPhoto("RUOTA 90°",edit5,v->rotate());
+        gridPhoto("SPECCHIO",edit5,v->mirror());
+        LinearLayout edit6=paired(studio);
+        beforeButton=gridToggle("MOSTRA ORIGINALE",false,edit6,v->toggleBefore());
+        beforeButton.setEnabled(false);needsPhoto.add(beforeButton);
+        comparisonButton=gridToggle("SPLIT PRIMA / DOPO",false,edit6,v->toggleComparison());
+        comparisonButton.setEnabled(false);needsPhoto.add(comparisonButton);
+        LinearLayout edit7=paired(studio);
+        overlayButton=gridToggle("GUIDE TECNICHE",false,edit7,v->toggleTechnicalOverlay());
+        overlayButton.setEnabled(false);needsPhoto.add(overlayButton);
+        gridPhoto("SPIEGA LE MODIFICHE",edit7,v->explain());
+        LinearLayout edit8=paired(studio);
+        gridAction("CLASSIFICA PARAMETRI TECNICI",edit8,v->pick(true));
+        gridPhoto("RICONOSCIMENTO EXTRA",edit8,v->runExtraRecognition(false));
+
+        // 05. Manual looks, exposure, contrast and saturation.
+        LinearLayout lookSection=section(panel,"05  COLOR LAB · REGOLAZIONI FINI",false);
+        LinearLayout lookRow=new LinearLayout(this);
+        lookRow.setGravity(Gravity.CENTER_VERTICAL);
         lookRow.addView(txt("LOOK",12));
         looks=new Spinner(this);
-        looks.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,ColorLooks.Look.labels()));
-        lookRow.addView(looks,new LinearLayout.LayoutParams(0,dp(47),1));panel.addView(lookRow);
+        looks.setAdapter(new ArrayAdapter<>(this,
+            android.R.layout.simple_spinner_dropdown_item,ColorLooks.Look.labels()));
+        lookRow.addView(looks,new LinearLayout.LayoutParams(0,dp(47),1));
+        lookSection.addView(lookRow);
         looks.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
-            @Override public void onItemSelected(android.widget.AdapterView<?> a,View v,int index,long id){
+            @Override public void onItemSelected(android.widget.AdapterView<?> a,
+                                                  View v,int index,long id){
                 selectedLook=ColorLooks.Look.values()[index];refresh();
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> a){}
         });
-        brightness=slider(panel,"ESPOSIZIONE SIMULATA",100);
-        contrast=slider(panel,"CONTRASTO",100);
-        saturation=slider(panel,"SATURAZIONE",100);
+        brightness=slider(lookSection,"ESPOSIZIONE SIMULATA",100);
+        contrast=slider(lookSection,"CONTRASTO",100);
+        saturation=slider(lookSection,"SATURAZIONE",100);
 
-        teacher=txt("LEZIONE VISIVA · L'assistente annoterà la foto, mostrando passo per passo come migliorarla.",12);
-        teacher.setTextColor(0xffb7fae9);panel.addView(teacher);
-        LinearLayout classroom=row(panel);
-        button("◀ INDIETRO",classroom,v->changeStep(-1));
-        button("AVANTI ▶",classroom,v->changeStep(+1));
-        playButton=toggleButton("ANIMAZIONI",playing,classroom,v->{
-            playing=!playing;if(playing)lesson.play();else lesson.pause();
+        // 06. The classroom is visible when requested, rather than always
+        // taking up space underneath the photograph.
+        LinearLayout classroomSection=section(panel,"06  VIRTUAL CLASSROOM · LEZIONI",false);
+        teacher=txt("LEZIONE VISIVA · L'assistente mostrerà sullo scatto "+
+            "gli interventi e spiegherà ogni passaggio.",12);
+        teacher.setTextColor(0xffb7fae9);
+        classroomSection.addView(teacher);
+        LinearLayout lessonPair=paired(classroomSection);
+        gridAction("◀ INDIETRO",lessonPair,v->changeStep(-1));
+        gridAction("AVANTI ▶",lessonPair,v->changeStep(+1));
+        LinearLayout playbackPair=paired(classroomSection);
+        playButton=gridToggle("ANIMAZIONI",playing,playbackPair,v->{
+            playing=!playing;
+            if(playing)lesson.play();else lesson.pause();
             updateButtonAvailability();
         });
         voice=getPreferences(MODE_PRIVATE).getBoolean("teacher_voice",true);
-        voiceButton=toggleButton("VOCE MAESTRO",voice,classroom,v->{
-            voice=!voice;getPreferences(MODE_PRIVATE).edit().putBoolean("teacher_voice",voice).apply();
+        voiceButton=gridToggle("VOCE MAESTRO",voice,playbackPair,v->{
+            voice=!voice;
+            getPreferences(MODE_PRIVATE).edit().putBoolean("teacher_voice",voice).apply();
             caption.setText(voice?"LEZIONE VOCALE ATTIVA":"LEZIONE VOCALE DISATTIVA");
             if(!voice&&speech!=null)speech.stop();
             else say(teacher.getText().toString());
             updateButtonAvailability();
         });
-        autoLessonButton=toggleButton("LEZIONE AUTOMATICA",false,classroom,v->{
+        LinearLayout automationPair=paired(classroomSection);
+        autoLessonButton=gridToggle("LEZIONE AUTOMATICA",false,automationPair,v->{
             if(autoLesson)stopAutoLesson();else beginAutoLesson();
             updateButtonAvailability();
         });
-        stepInfo=txt(steps[0],12);panel.addView(stepInfo);
+        gridPhoto("SPIEGA IL VERDETTO",automationPair,v->explain());
+        stepInfo=txt(steps[0],12);
+        classroomSection.addView(stepInfo);
+
+        // 07. Infrequent setup actions are grouped at the very bottom.
+        LinearLayout modelsSection=section(panel,"07  MODELLI IA · DOWNLOAD & ARCHIVIO",false);
+        qwenDownloadButton=gridAction("SCARICA QWEN3-VL 2B (1,55 GB)",
+            paired(modelsSection),v->downloadQwen());
+        LinearLayout downloadPair=paired(modelsSection);
+        gridAction("IMPORTA GGUF DA DOWNLOAD",downloadPair,v->pickQwen());
+        gridAction("SOSPENDI DOWNLOAD",downloadPair,v->{
+            if(qwenModels!=null)qwenModels.cancel();
+        });
+        LinearLayout musiqPair=paired(modelsSection);
+        gridAction("IMPORTA MUSIQ ONNX",musiqPair,v->pickMusiq());
+        gridAction("IMPORTA MOBILENET",musiqPair,v->pickModel());
+        extraRecognition=new ExtraRecognition(this);
+        LinearLayout modelSwitches=paired(modelsSection);
+        extraAiToggle=gridToggle("DOWNLOAD AI AUTOMATICO",
+            extraRecognition.autoEnabled(),modelSwitches,v->{
+                extraRecognition.setAutoEnabled(!extraRecognition.autoEnabled());
+                AmpyButtons.setToggle(extraAiToggle,extraRecognition.autoEnabled());
+                modelStatus.setText(extraRecognition.autoEnabled()?
+                    "MobileNet · Download automatico attivo.":
+                    "MobileNet · Download automatico disattivato.");
+            });
+        mobileAiToggle=gridToggle("DATI MOBILI AI",
+            extraRecognition.allowMobileAuto(),modelSwitches,v->{
+                extraRecognition.setAllowMobileAuto(!extraRecognition.allowMobileAuto());
+                AmpyButtons.setToggle(mobileAiToggle,extraRecognition.allowMobileAuto());
+                modelStatus.setText(extraRecognition.allowMobileAuto()?
+                    "Modelli via 4G/5G consentiti (roaming automatico escluso).":
+                    "Download automatico limitato al Wi-Fi.");
+            });
+        modelStatus=txt("MOBILE NET · "+ExtraRecognition.modelName()+
+            " · "+(extraRecognition.isCached()?"modello presente":"download a richiesta"),12);
+        modelStatus.setTextColor(0xff8debd2);
+        modelsSection.addView(modelStatus);
+        LinearLayout infoPair=paired(modelsSection);
+        gridAction("INFO & LIMITI DEI MODELLI",infoPair,v->
+            new AlertDialog.Builder(this)
+                .setTitle("AmpyEOS · modelli di riconoscimento")
+                .setMessage("Qwen3-VL con llama.cpp: analisi visiva locale. "+
+                    "MUSIQ con ONNX Runtime: qualità percettiva. "+
+                    "MobileNetV2 con TFLite: categorie di oggetti. "+
+                    "Il classificatore MobileNet non deve dare voti artistici; "+
+                    "l'originale non viene mai sovrascritto. "+
+                    "Solo Qwen analizza la scena in modo multimodale.")
+                .setPositiveButton("OK",null).show());
         stillSubject=new SubjectAi();
         updateButtonAvailability();
         speech=new TextToSpeech(this,code->{if(code==TextToSpeech.SUCCESS && speech!=null){
